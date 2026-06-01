@@ -323,7 +323,16 @@ StreamDescriptor makeStreamDescriptor(StreamNodeStaticModel const& s, StreamNode
 	desc.localizedDescription = s.localizedDescription;
 	desc.clockDomainIndex = s.clockDomainIndex;
 	desc.streamFlags = s.streamFlags;
+	// la_avdecc does not carry the nested-descriptor *dynamic* models from the provided
+	// EntityTree into the live entity (only static models + top-level entity dynamic), so
+	// the dynamic streamFormat is null here. For a fixed-format talker the current format
+	// is the (sole) supported format, so fall back to the first static format. Without a
+	// valid currentFormat, controllers (Hive) divide-by-zero on the stream's nominal rate.
 	desc.currentFormat = d.streamFormat;
+	if (!desc.currentFormat && !s.formats.empty())
+	{
+		desc.currentFormat = *s.formats.begin();
+	}
 	desc.backupTalkerEntityID_0 = s.backupTalkerEntityID_0;
 	desc.backupTalkerUniqueID_0 = s.backupTalkerUniqueID_0;
 	desc.backupTalkerEntityID_1 = s.backupTalkerEntityID_1;
