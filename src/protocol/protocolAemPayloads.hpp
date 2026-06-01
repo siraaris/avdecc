@@ -183,6 +183,20 @@ std::tuple<entity::model::ConfigurationIndex, entity::model::DescriptorType, ent
 Serializer<AemAecpdu::MaximumSendPayloadBufferLength> serializeReadDescriptorCommonResponse(entity::model::ConfigurationIndex const configurationIndex, entity::model::DescriptorType const descriptorType, entity::model::DescriptorIndex const descriptorIndex);
 void serializeReadEntityDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::EntityDescriptor const& entityDescriptor);
 void serializeReadConfigurationDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::ConfigurationDescriptor const& configurationDescriptor);
+// 3SB additive (GH #15): AEM response serializers for the talker entity responder.
+// la_avdecc upstream only implements ENTITY+CONFIGURATION serializers (the rest are
+// deserialize-only, controller-side); these complete the set so a talker entity can
+// answer READ_DESCRIPTOR for the full configuration tree.
+void serializeReadAudioUnitDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::AudioUnitDescriptor const& audioUnitDescriptor);
+void serializeReadStreamDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::StreamDescriptor const& streamDescriptor);
+void serializeReadAvbInterfaceDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::AvbInterfaceDescriptor const& avbInterfaceDescriptor);
+void serializeReadClockSourceDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::ClockSourceDescriptor const& clockSourceDescriptor);
+void serializeReadLocaleDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::LocaleDescriptor const& localeDescriptor);
+void serializeReadStringsDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::StringsDescriptor const& stringsDescriptor);
+void serializeReadStreamPortDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::StreamPortDescriptor const& streamPortDescriptor);
+void serializeReadAudioClusterDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::AudioClusterDescriptor const& audioClusterDescriptor);
+void serializeReadAudioMapDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::AudioMapDescriptor const& audioMapDescriptor);
+void serializeReadClockDomainDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::ClockDomainDescriptor const& clockDomainDescriptor);
 std::tuple<size_t, entity::model::ConfigurationIndex, entity::model::DescriptorType, entity::model::DescriptorIndex> deserializeReadDescriptorCommonResponse(entity::LocalEntity::AemCommandStatus const status, AemAecpdu::Payload const& payload);
 entity::model::EntityDescriptor deserializeReadEntityDescriptorResponse(AemAecpdu::Payload const& payload, size_t const commonSize, AemAecpStatus const status);
 entity::model::ConfigurationDescriptor deserializeReadConfigurationDescriptorResponse(AemAecpdu::Payload const& payload, size_t const commonSize, AemAecpStatus const status);

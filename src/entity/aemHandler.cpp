@@ -108,6 +108,86 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 							LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
 							return true;
 						}
+						// 3SB additive (GH #15): full descriptor-tree coverage for the talker
+						// entity responder. Each builder throws NoSuchDescriptorException when
+						// the index is absent (translated to NoSuchDescriptor by the catch below).
+						case DescriptorType::AudioUnit:
+						{
+							auto ser = protocol::aemPayload::serializeReadDescriptorCommonResponse(configIndex, descriptorType, descriptorIndex);
+							protocol::aemPayload::serializeReadAudioUnitDescriptorResponse(ser, aemHandler.buildAudioUnitDescriptor(configIndex, descriptorIndex));
+							LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+							return true;
+						}
+						case DescriptorType::StreamInput:
+						{
+							auto ser = protocol::aemPayload::serializeReadDescriptorCommonResponse(configIndex, descriptorType, descriptorIndex);
+							protocol::aemPayload::serializeReadStreamDescriptorResponse(ser, aemHandler.buildStreamInputDescriptor(configIndex, descriptorIndex));
+							LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+							return true;
+						}
+						case DescriptorType::StreamOutput:
+						{
+							auto ser = protocol::aemPayload::serializeReadDescriptorCommonResponse(configIndex, descriptorType, descriptorIndex);
+							protocol::aemPayload::serializeReadStreamDescriptorResponse(ser, aemHandler.buildStreamOutputDescriptor(configIndex, descriptorIndex));
+							LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+							return true;
+						}
+						case DescriptorType::AvbInterface:
+						{
+							auto ser = protocol::aemPayload::serializeReadDescriptorCommonResponse(configIndex, descriptorType, descriptorIndex);
+							protocol::aemPayload::serializeReadAvbInterfaceDescriptorResponse(ser, aemHandler.buildAvbInterfaceDescriptor(configIndex, descriptorIndex));
+							LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+							return true;
+						}
+						case DescriptorType::ClockSource:
+						{
+							auto ser = protocol::aemPayload::serializeReadDescriptorCommonResponse(configIndex, descriptorType, descriptorIndex);
+							protocol::aemPayload::serializeReadClockSourceDescriptorResponse(ser, aemHandler.buildClockSourceDescriptor(configIndex, descriptorIndex));
+							LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+							return true;
+						}
+						case DescriptorType::ClockDomain:
+						{
+							auto ser = protocol::aemPayload::serializeReadDescriptorCommonResponse(configIndex, descriptorType, descriptorIndex);
+							protocol::aemPayload::serializeReadClockDomainDescriptorResponse(ser, aemHandler.buildClockDomainDescriptor(configIndex, descriptorIndex));
+							LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+							return true;
+						}
+						case DescriptorType::StreamPortOutput:
+						{
+							auto ser = protocol::aemPayload::serializeReadDescriptorCommonResponse(configIndex, descriptorType, descriptorIndex);
+							protocol::aemPayload::serializeReadStreamPortDescriptorResponse(ser, aemHandler.buildStreamPortOutputDescriptor(configIndex, descriptorIndex));
+							LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+							return true;
+						}
+						case DescriptorType::AudioCluster:
+						{
+							auto ser = protocol::aemPayload::serializeReadDescriptorCommonResponse(configIndex, descriptorType, descriptorIndex);
+							protocol::aemPayload::serializeReadAudioClusterDescriptorResponse(ser, aemHandler.buildAudioClusterDescriptor(configIndex, descriptorIndex));
+							LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+							return true;
+						}
+						case DescriptorType::AudioMap:
+						{
+							auto ser = protocol::aemPayload::serializeReadDescriptorCommonResponse(configIndex, descriptorType, descriptorIndex);
+							protocol::aemPayload::serializeReadAudioMapDescriptorResponse(ser, aemHandler.buildAudioMapDescriptor(configIndex, descriptorIndex));
+							LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+							return true;
+						}
+						case DescriptorType::Locale:
+						{
+							auto ser = protocol::aemPayload::serializeReadDescriptorCommonResponse(configIndex, descriptorType, descriptorIndex);
+							protocol::aemPayload::serializeReadLocaleDescriptorResponse(ser, aemHandler.buildLocaleDescriptor(configIndex, descriptorIndex));
+							LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+							return true;
+						}
+						case DescriptorType::Strings:
+						{
+							auto ser = protocol::aemPayload::serializeReadDescriptorCommonResponse(configIndex, descriptorType, descriptorIndex);
+							protocol::aemPayload::serializeReadStringsDescriptorResponse(ser, aemHandler.buildStringsDescriptor(configIndex, descriptorIndex));
+							LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+							return true;
+						}
 						default:
 							break;
 					}
@@ -215,6 +295,329 @@ ConfigurationDescriptor AemHandler::buildConfigurationDescriptor(entity::model::
 	std::unordered_map<DescriptorType, std::uint16_t, la::avdecc::utils::EnumClassHash> descriptorCounts{};
 
 	return configDescriptor;
+}
+
+/* ************************************************************************** */
+/* 3SB additive (GH #15): descriptor builders for the talker entity responder */
+/* ************************************************************************** */
+namespace
+{
+ConfigurationTree const& getConfigurationTree(EntityTree const* const tree, ConfigurationIndex const configIndex)
+{
+	if (tree == nullptr)
+	{
+		throw NoSuchDescriptorException{};
+	}
+	auto const it = tree->configurationTrees.find(configIndex);
+	if (it == tree->configurationTrees.end())
+	{
+		throw NoSuchDescriptorException{};
+	}
+	return it->second;
+}
+
+StreamDescriptor makeStreamDescriptor(StreamNodeStaticModel const& s, StreamNodeDynamicModel const& d)
+{
+	auto desc = StreamDescriptor{};
+	desc.objectName = d.objectName;
+	desc.localizedDescription = s.localizedDescription;
+	desc.clockDomainIndex = s.clockDomainIndex;
+	desc.streamFlags = s.streamFlags;
+	desc.currentFormat = d.streamFormat;
+	desc.backupTalkerEntityID_0 = s.backupTalkerEntityID_0;
+	desc.backupTalkerUniqueID_0 = s.backupTalkerUniqueID_0;
+	desc.backupTalkerEntityID_1 = s.backupTalkerEntityID_1;
+	desc.backupTalkerUniqueID_1 = s.backupTalkerUniqueID_1;
+	desc.backupTalkerEntityID_2 = s.backupTalkerEntityID_2;
+	desc.backupTalkerUniqueID_2 = s.backupTalkerUniqueID_2;
+	desc.backedupTalkerEntityID = s.backedupTalkerEntityID;
+	desc.backedupTalkerUnique = s.backedupTalkerUnique;
+	desc.avbInterfaceIndex = s.avbInterfaceIndex;
+	desc.bufferLength = s.bufferLength;
+	desc.formats = s.formats;
+	return desc;
+}
+
+StreamPortTree const* findStreamPortOutput(ConfigurationTree const& cfg, StreamPortIndex const streamPortIndex)
+{
+	for (auto const& [audioUnitIndex, audioUnit] : cfg.audioUnitTrees)
+	{
+		auto const it = audioUnit.streamPortOutputTrees.find(streamPortIndex);
+		if (it != audioUnit.streamPortOutputTrees.end())
+		{
+			return &it->second;
+		}
+	}
+	return nullptr;
+}
+
+AudioClusterNodeModels const* findAudioCluster(ConfigurationTree const& cfg, ClusterIndex const clusterIndex)
+{
+	for (auto const& [audioUnitIndex, audioUnit] : cfg.audioUnitTrees)
+	{
+		for (auto const* const trees : { &audioUnit.streamPortOutputTrees, &audioUnit.streamPortInputTrees })
+		{
+			for (auto const& [streamPortIndex, streamPort] : *trees)
+			{
+				auto const it = streamPort.audioClusterModels.find(clusterIndex);
+				if (it != streamPort.audioClusterModels.end())
+				{
+					return &it->second;
+				}
+			}
+		}
+	}
+	return nullptr;
+}
+
+AudioMapNodeModels const* findAudioMap(ConfigurationTree const& cfg, MapIndex const mapIndex)
+{
+	for (auto const& [audioUnitIndex, audioUnit] : cfg.audioUnitTrees)
+	{
+		for (auto const* const trees : { &audioUnit.streamPortOutputTrees, &audioUnit.streamPortInputTrees })
+		{
+			for (auto const& [streamPortIndex, streamPort] : *trees)
+			{
+				auto const it = streamPort.audioMapModels.find(mapIndex);
+				if (it != streamPort.audioMapModels.end())
+				{
+					return &it->second;
+				}
+			}
+		}
+	}
+	return nullptr;
+}
+} // namespace
+
+AudioUnitDescriptor AemHandler::buildAudioUnitDescriptor(ConfigurationIndex const configIndex, AudioUnitIndex const audioUnitIndex) const
+{
+	auto const& cfg = getConfigurationTree(_entityModelTree, configIndex);
+	auto const it = cfg.audioUnitTrees.find(audioUnitIndex);
+	if (it == cfg.audioUnitTrees.end())
+	{
+		throw NoSuchDescriptorException{};
+	}
+	auto const& s = it->second.staticModel;
+	auto const& d = it->second.dynamicModel;
+	auto desc = AudioUnitDescriptor{};
+	desc.objectName = d.objectName;
+	desc.localizedDescription = s.localizedDescription;
+	desc.clockDomainIndex = s.clockDomainIndex;
+	desc.numberOfStreamInputPorts = s.numberOfStreamInputPorts;
+	desc.baseStreamInputPort = s.baseStreamInputPort;
+	desc.numberOfStreamOutputPorts = s.numberOfStreamOutputPorts;
+	desc.baseStreamOutputPort = s.baseStreamOutputPort;
+	desc.numberOfExternalInputPorts = s.numberOfExternalInputPorts;
+	desc.baseExternalInputPort = s.baseExternalInputPort;
+	desc.numberOfExternalOutputPorts = s.numberOfExternalOutputPorts;
+	desc.baseExternalOutputPort = s.baseExternalOutputPort;
+	desc.numberOfInternalInputPorts = s.numberOfInternalInputPorts;
+	desc.baseInternalInputPort = s.baseInternalInputPort;
+	desc.numberOfInternalOutputPorts = s.numberOfInternalOutputPorts;
+	desc.baseInternalOutputPort = s.baseInternalOutputPort;
+	desc.numberOfControls = s.numberOfControls;
+	desc.baseControl = s.baseControl;
+	desc.numberOfSignalSelectors = s.numberOfSignalSelectors;
+	desc.baseSignalSelector = s.baseSignalSelector;
+	desc.numberOfMixers = s.numberOfMixers;
+	desc.baseMixer = s.baseMixer;
+	desc.numberOfMatrices = s.numberOfMatrices;
+	desc.baseMatrix = s.baseMatrix;
+	desc.numberOfSplitters = s.numberOfSplitters;
+	desc.baseSplitter = s.baseSplitter;
+	desc.numberOfCombiners = s.numberOfCombiners;
+	desc.baseCombiner = s.baseCombiner;
+	desc.numberOfDemultiplexers = s.numberOfDemultiplexers;
+	desc.baseDemultiplexer = s.baseDemultiplexer;
+	desc.numberOfMultiplexers = s.numberOfMultiplexers;
+	desc.baseMultiplexer = s.baseMultiplexer;
+	desc.numberOfTranscoders = s.numberOfTranscoders;
+	desc.baseTranscoder = s.baseTranscoder;
+	desc.numberOfControlBlocks = s.numberOfControlBlocks;
+	desc.baseControlBlock = s.baseControlBlock;
+	desc.currentSamplingRate = d.currentSamplingRate;
+	desc.samplingRates = s.samplingRates;
+	return desc;
+}
+
+StreamDescriptor AemHandler::buildStreamOutputDescriptor(ConfigurationIndex const configIndex, StreamIndex const streamIndex) const
+{
+	auto const& cfg = getConfigurationTree(_entityModelTree, configIndex);
+	auto const it = cfg.streamOutputModels.find(streamIndex);
+	if (it == cfg.streamOutputModels.end())
+	{
+		throw NoSuchDescriptorException{};
+	}
+	return makeStreamDescriptor(it->second.staticModel, it->second.dynamicModel);
+}
+
+StreamDescriptor AemHandler::buildStreamInputDescriptor(ConfigurationIndex const configIndex, StreamIndex const streamIndex) const
+{
+	auto const& cfg = getConfigurationTree(_entityModelTree, configIndex);
+	auto const it = cfg.streamInputModels.find(streamIndex);
+	if (it == cfg.streamInputModels.end())
+	{
+		throw NoSuchDescriptorException{};
+	}
+	return makeStreamDescriptor(it->second.staticModel, it->second.dynamicModel);
+}
+
+AvbInterfaceDescriptor AemHandler::buildAvbInterfaceDescriptor(ConfigurationIndex const configIndex, AvbInterfaceIndex const avbInterfaceIndex) const
+{
+	auto const& cfg = getConfigurationTree(_entityModelTree, configIndex);
+	auto const it = cfg.avbInterfaceModels.find(avbInterfaceIndex);
+	if (it == cfg.avbInterfaceModels.end())
+	{
+		throw NoSuchDescriptorException{};
+	}
+	auto const& s = it->second.staticModel;
+	auto const& d = it->second.dynamicModel;
+	auto desc = AvbInterfaceDescriptor{};
+	desc.objectName = d.objectName;
+	desc.localizedDescription = s.localizedDescription;
+	desc.macAddress = d.macAddress;
+	desc.interfaceFlags = s.interfaceFlags;
+	desc.clockIdentity = d.clockIdentity;
+	desc.priority1 = d.priority1;
+	desc.clockClass = d.clockClass;
+	desc.offsetScaledLogVariance = d.offsetScaledLogVariance;
+	desc.clockAccuracy = d.clockAccuracy;
+	desc.priority2 = d.priority2;
+	desc.domainNumber = d.domainNumber;
+	desc.logSyncInterval = d.logSyncInterval;
+	desc.logAnnounceInterval = d.logAnnounceInterval;
+	desc.logPDelayInterval = d.logPDelayInterval;
+	desc.portNumber = s.portNumber;
+	return desc;
+}
+
+ClockSourceDescriptor AemHandler::buildClockSourceDescriptor(ConfigurationIndex const configIndex, ClockSourceIndex const clockSourceIndex) const
+{
+	auto const& cfg = getConfigurationTree(_entityModelTree, configIndex);
+	auto const it = cfg.clockSourceModels.find(clockSourceIndex);
+	if (it == cfg.clockSourceModels.end())
+	{
+		throw NoSuchDescriptorException{};
+	}
+	auto const& s = it->second.staticModel;
+	auto const& d = it->second.dynamicModel;
+	auto desc = ClockSourceDescriptor{};
+	desc.objectName = d.objectName;
+	desc.localizedDescription = s.localizedDescription;
+	desc.clockSourceFlags = d.clockSourceFlags;
+	desc.clockSourceType = s.clockSourceType;
+	desc.clockSourceIdentifier = d.clockSourceIdentifier;
+	desc.clockSourceLocationType = s.clockSourceLocationType;
+	desc.clockSourceLocationIndex = s.clockSourceLocationIndex;
+	return desc;
+}
+
+ClockDomainDescriptor AemHandler::buildClockDomainDescriptor(ConfigurationIndex const configIndex, ClockDomainIndex const clockDomainIndex) const
+{
+	auto const& cfg = getConfigurationTree(_entityModelTree, configIndex);
+	auto const it = cfg.clockDomainModels.find(clockDomainIndex);
+	if (it == cfg.clockDomainModels.end())
+	{
+		throw NoSuchDescriptorException{};
+	}
+	auto const& s = it->second.staticModel;
+	auto const& d = it->second.dynamicModel;
+	auto desc = ClockDomainDescriptor{};
+	desc.objectName = d.objectName;
+	desc.localizedDescription = s.localizedDescription;
+	desc.clockSourceIndex = d.clockSourceIndex;
+	desc.clockSources = s.clockSources;
+	return desc;
+}
+
+LocaleDescriptor AemHandler::buildLocaleDescriptor(ConfigurationIndex const configIndex, LocaleIndex const localeIndex) const
+{
+	auto const& cfg = getConfigurationTree(_entityModelTree, configIndex);
+	auto const it = cfg.localeTrees.find(localeIndex);
+	if (it == cfg.localeTrees.end())
+	{
+		throw NoSuchDescriptorException{};
+	}
+	auto const& s = it->second.staticModel;
+	auto desc = LocaleDescriptor{};
+	desc.localeID = s.localeID;
+	desc.numberOfStringDescriptors = s.numberOfStringDescriptors;
+	desc.baseStringDescriptorIndex = s.baseStringDescriptorIndex;
+	return desc;
+}
+
+StringsDescriptor AemHandler::buildStringsDescriptor(ConfigurationIndex const configIndex, StringsIndex const stringsIndex) const
+{
+	auto const& cfg = getConfigurationTree(_entityModelTree, configIndex);
+	for (auto const& [localeIndex, locale] : cfg.localeTrees)
+	{
+		auto const it = locale.stringsModels.find(stringsIndex);
+		if (it != locale.stringsModels.end())
+		{
+			auto desc = StringsDescriptor{};
+			desc.strings = it->second.staticModel.strings;
+			return desc;
+		}
+	}
+	throw NoSuchDescriptorException{};
+}
+
+StreamPortDescriptor AemHandler::buildStreamPortOutputDescriptor(ConfigurationIndex const configIndex, StreamPortIndex const streamPortIndex) const
+{
+	auto const& cfg = getConfigurationTree(_entityModelTree, configIndex);
+	auto const* const streamPort = findStreamPortOutput(cfg, streamPortIndex);
+	if (streamPort == nullptr)
+	{
+		throw NoSuchDescriptorException{};
+	}
+	auto const& s = streamPort->staticModel;
+	auto desc = StreamPortDescriptor{};
+	desc.clockDomainIndex = s.clockDomainIndex;
+	desc.portFlags = s.portFlags;
+	desc.numberOfControls = s.numberOfControls;
+	desc.baseControl = s.baseControl;
+	desc.numberOfClusters = s.numberOfClusters;
+	desc.baseCluster = s.baseCluster;
+	desc.numberOfMaps = s.numberOfMaps;
+	desc.baseMap = s.baseMap;
+	return desc;
+}
+
+AudioClusterDescriptor AemHandler::buildAudioClusterDescriptor(ConfigurationIndex const configIndex, ClusterIndex const clusterIndex) const
+{
+	auto const& cfg = getConfigurationTree(_entityModelTree, configIndex);
+	auto const* const cluster = findAudioCluster(cfg, clusterIndex);
+	if (cluster == nullptr)
+	{
+		throw NoSuchDescriptorException{};
+	}
+	auto const& s = cluster->staticModel;
+	auto const& d = cluster->dynamicModel;
+	auto desc = AudioClusterDescriptor{};
+	desc.objectName = d.objectName;
+	desc.localizedDescription = s.localizedDescription;
+	desc.signalType = s.signalType;
+	desc.signalIndex = s.signalIndex;
+	desc.signalOutput = s.signalOutput;
+	desc.pathLatency = s.pathLatency;
+	desc.blockLatency = s.blockLatency;
+	desc.channelCount = s.channelCount;
+	desc.format = s.format;
+	return desc;
+}
+
+AudioMapDescriptor AemHandler::buildAudioMapDescriptor(ConfigurationIndex const configIndex, MapIndex const mapIndex) const
+{
+	auto const& cfg = getConfigurationTree(_entityModelTree, configIndex);
+	auto const* const map = findAudioMap(cfg, mapIndex);
+	if (map == nullptr)
+	{
+		throw NoSuchDescriptorException{};
+	}
+	auto desc = AudioMapDescriptor{};
+	desc.mappings = map->staticModel.mappings;
+	return desc;
 }
 
 } // namespace model

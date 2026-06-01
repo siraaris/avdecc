@@ -27,6 +27,7 @@
 #include "logHelper.hpp"
 #include "aggregateEntityImpl.hpp"
 #include "controllerCapabilityDelegate.hpp"
+#include "talkerCapabilityDelegate.hpp"
 
 #include <exception>
 #include <cassert>
@@ -62,8 +63,10 @@ AggregateEntityImpl::AggregateEntityImpl(protocol::ProtocolInterface* const prot
 	// Entity is talker capable
 	if (commonInformation.talkerCapabilities.test(TalkerCapability::Implemented))
 	{
-		AVDECC_ASSERT(false, "TODO: AggregateEntityImpl: Handle talker capability");
-		//_talkerCapabilityDelegate = std::make_unique<talker::CapabilityDelegate>(entityID);
+		// 3SB additive (GH #15): talker entity-responder delegate. Provides ADP
+		// advertise + AECP AEM responder (READ_DESCRIPTOR via the shared AemHandler).
+		// ACMP talker state machine is a later milestone; see talkerCapabilityDelegate.hpp.
+		_talkerCapabilityDelegate = std::make_unique<talker::CapabilityDelegate>(getProtocolInterface(), *this, entityModelTree);
 	}
 
 	// Register observer

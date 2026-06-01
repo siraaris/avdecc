@@ -253,6 +253,148 @@ void serializeReadConfigurationDescriptorResponse(Serializer<AemAecpdu::MaximumS
 	}
 }
 
+/* ************************************************************************** */
+/* 3SB additive (GH #15): AEM response serializers (talker entity responder)  */
+/* Mirror the field order of the matching deserialize* functions. Offsets for */
+/* variable-length sections are precomputed (the Serializer is append-only),   */
+/* following serializeReadConfigurationDescriptorResponse above. NOTE: wire    */
+/* correctness to be validated against a real controller (Hive) on the rig.    */
+/* ************************************************************************** */
+void serializeReadAudioUnitDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::AudioUnitDescriptor const& d)
+{
+	ser << d.objectName;
+	ser << d.localizedDescription << d.clockDomainIndex;
+	ser << d.numberOfStreamInputPorts << d.baseStreamInputPort;
+	ser << d.numberOfStreamOutputPorts << d.baseStreamOutputPort;
+	ser << d.numberOfExternalInputPorts << d.baseExternalInputPort;
+	ser << d.numberOfExternalOutputPorts << d.baseExternalOutputPort;
+	ser << d.numberOfInternalInputPorts << d.baseInternalInputPort;
+	ser << d.numberOfInternalOutputPorts << d.baseInternalOutputPort;
+	ser << d.numberOfControls << d.baseControl;
+	ser << d.numberOfSignalSelectors << d.baseSignalSelector;
+	ser << d.numberOfMixers << d.baseMixer;
+	ser << d.numberOfMatrices << d.baseMatrix;
+	ser << d.numberOfSplitters << d.baseSplitter;
+	ser << d.numberOfCombiners << d.baseCombiner;
+	ser << d.numberOfDemultiplexers << d.baseDemultiplexer;
+	ser << d.numberOfMultiplexers << d.baseMultiplexer;
+	ser << d.numberOfTranscoders << d.baseTranscoder;
+	ser << d.numberOfControlBlocks << d.baseControlBlock;
+	ser << d.currentSamplingRate;
+	// samplingRates follow the (offset, count) pair => +2 fields ahead of the data
+	auto const numberOfSamplingRates = static_cast<std::uint16_t>(d.samplingRates.size());
+	auto const samplingRatesOffset = static_cast<std::uint16_t>(ser.usedBytes() - PayloadBufferOffset + sizeof(std::uint16_t) * 2);
+	ser << samplingRatesOffset << numberOfSamplingRates;
+	for (auto const& rate : d.samplingRates)
+	{
+		ser << rate;
+	}
+}
+
+void serializeReadStreamDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::StreamDescriptor const& d)
+{
+	ser << d.objectName;
+	ser << d.localizedDescription << d.clockDomainIndex << d.streamFlags;
+	ser << d.currentFormat;
+	// The formats list lands after the (offset, count) pair AND the fixed tail
+	// (3x backup talker {UID(8)+uid(2)} + backedup {UID(8)+uid(2)} + avbInterfaceIndex(2) + bufferLength(4) = 46 bytes).
+	// We emit no redundancy offset/count, so the deserializer sees 0 bytes before formats and skips redundancy.
+	constexpr std::uint16_t fixedTailAfterFormatCountBytes = 3u * (8u + 2u) + (8u + 2u) + 2u + 4u; // = 46
+	auto const numberOfFormats = static_cast<std::uint16_t>(d.formats.size());
+	auto const formatsOffset = static_cast<std::uint16_t>(ser.usedBytes() - PayloadBufferOffset + sizeof(std::uint16_t) * 2 + fixedTailAfterFormatCountBytes);
+	ser << formatsOffset << numberOfFormats;
+	ser << d.backupTalkerEntityID_0 << d.backupTalkerUniqueID_0;
+	ser << d.backupTalkerEntityID_1 << d.backupTalkerUniqueID_1;
+	ser << d.backupTalkerEntityID_2 << d.backupTalkerUniqueID_2;
+	ser << d.backedupTalkerEntityID << d.backedupTalkerUnique;
+	ser << d.avbInterfaceIndex << d.bufferLength;
+	for (auto const& format : d.formats)
+	{
+		ser << format;
+	}
+}
+
+void serializeReadAvbInterfaceDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::AvbInterfaceDescriptor const& d)
+{
+	ser << d.objectName;
+	ser << d.localizedDescription;
+	ser << d.macAddress;
+	ser << d.interfaceFlags;
+	ser << d.clockIdentity;
+	ser << d.priority1 << d.clockClass;
+	ser << d.offsetScaledLogVariance << d.clockAccuracy;
+	ser << d.priority2 << d.domainNumber;
+	ser << d.logSyncInterval << d.logAnnounceInterval << d.logPDelayInterval;
+	ser << d.portNumber;
+}
+
+void serializeReadClockSourceDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::ClockSourceDescriptor const& d)
+{
+	ser << d.objectName;
+	ser << d.localizedDescription;
+	ser << d.clockSourceFlags << d.clockSourceType;
+	ser << d.clockSourceIdentifier;
+	ser << d.clockSourceLocationType << d.clockSourceLocationIndex;
+}
+
+void serializeReadLocaleDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::LocaleDescriptor const& d)
+{
+	ser << d.localeID;
+	ser << d.numberOfStringDescriptors << d.baseStringDescriptorIndex;
+}
+
+void serializeReadStringsDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::StringsDescriptor const& d)
+{
+	for (auto const& str : d.strings)
+	{
+		ser << str;
+	}
+}
+
+void serializeReadStreamPortDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::StreamPortDescriptor const& d)
+{
+	ser << d.clockDomainIndex << d.portFlags;
+	ser << d.numberOfControls << d.baseControl;
+	ser << d.numberOfClusters << d.baseCluster;
+	ser << d.numberOfMaps << d.baseMap;
+}
+
+void serializeReadAudioClusterDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::AudioClusterDescriptor const& d)
+{
+	ser << d.objectName;
+	ser << d.localizedDescription;
+	ser << d.signalType << d.signalIndex << d.signalOutput;
+	ser << d.pathLatency << d.blockLatency;
+	ser << d.channelCount << d.format;
+}
+
+void serializeReadAudioMapDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::AudioMapDescriptor const& d)
+{
+	// mappings follow the (offset, count) pair => +2 fields ahead of the data
+	auto const numberOfMappings = static_cast<std::uint16_t>(d.mappings.size());
+	auto const mappingsOffset = static_cast<std::uint16_t>(ser.usedBytes() - PayloadBufferOffset + sizeof(std::uint16_t) * 2);
+	ser << mappingsOffset << numberOfMappings;
+	for (auto const& mapping : d.mappings)
+	{
+		ser << mapping.streamIndex << mapping.streamChannel << mapping.clusterOffset << mapping.clusterChannel;
+	}
+}
+
+void serializeReadClockDomainDescriptorResponse(Serializer<AemAecpdu::MaximumSendPayloadBufferLength>& ser, entity::model::ClockDomainDescriptor const& d)
+{
+	ser << d.objectName;
+	ser << d.localizedDescription;
+	ser << d.clockSourceIndex;
+	// clockSources follow the (offset, count) pair => +2 fields ahead of the data
+	auto const numberOfClockSources = static_cast<std::uint16_t>(d.clockSources.size());
+	auto const clockSourcesOffset = static_cast<std::uint16_t>(ser.usedBytes() - PayloadBufferOffset + sizeof(std::uint16_t) * 2);
+	ser << clockSourcesOffset << numberOfClockSources;
+	for (auto const& clockSourceIndex : d.clockSources)
+	{
+		ser << clockSourceIndex;
+	}
+}
+
 std::tuple<size_t, entity::model::ConfigurationIndex, entity::model::DescriptorType, entity::model::DescriptorIndex> deserializeReadDescriptorCommonResponse(entity::LocalEntity::AemCommandStatus const status, AemAecpdu::Payload const& payload)
 {
 	auto* const commandPayload = payload.first;

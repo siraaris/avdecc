@@ -55,6 +55,20 @@ public:
 private:
 	EntityDescriptor buildEntityDescriptor() const noexcept;
 	ConfigurationDescriptor buildConfigurationDescriptor(entity::model::ConfigurationIndex const configIndex) const;
+	// 3SB additive (GH #15): descriptor builders for the talker entity responder so a
+	// controller (e.g. Hive) can enumerate the full configuration tree. Each throws
+	// NoSuchDescriptorException when the requested index is absent from the tree.
+	AudioUnitDescriptor buildAudioUnitDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::AudioUnitIndex const audioUnitIndex) const;
+	StreamDescriptor buildStreamOutputDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::StreamIndex const streamIndex) const;
+	StreamDescriptor buildStreamInputDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::StreamIndex const streamIndex) const;
+	AvbInterfaceDescriptor buildAvbInterfaceDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::AvbInterfaceIndex const avbInterfaceIndex) const;
+	ClockSourceDescriptor buildClockSourceDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::ClockSourceIndex const clockSourceIndex) const;
+	ClockDomainDescriptor buildClockDomainDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::ClockDomainIndex const clockDomainIndex) const;
+	LocaleDescriptor buildLocaleDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::LocaleIndex const localeIndex) const;
+	StringsDescriptor buildStringsDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::StringsIndex const stringsIndex) const;
+	StreamPortDescriptor buildStreamPortOutputDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::StreamPortIndex const streamPortIndex) const;
+	AudioClusterDescriptor buildAudioClusterDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::ClusterIndex const clusterIndex) const;
+	AudioMapDescriptor buildAudioMapDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::MapIndex const mapIndex) const;
 
 	entity::Entity const& _entity;
 	entity::model::EntityTree const* _entityModelTree{ nullptr };
