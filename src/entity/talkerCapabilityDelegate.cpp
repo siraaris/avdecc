@@ -61,6 +61,7 @@ CapabilityDelegate::CapabilityDelegate(protocol::ProtocolInterface* const protoc
 try
 	: _protocolInterface{ protocolInterface }
 	, _entityID{ entity.getEntityID() }
+	, _talkerMac{ talkerMacFromEntity(entity) }
 	, _entityModelTree{ entityModelTree }
 	, _aemHandler{ entity, entityModelTree }
 {
@@ -115,12 +116,26 @@ std::uint16_t CapabilityDelegate::streamOutputCount() const noexcept
 	return static_cast<std::uint16_t>(it->second.streamOutputModels.size());
 }
 
+networkInterface::MacAddress CapabilityDelegate::talkerMacFromEntity(Entity const& entity) noexcept
+{
+	auto const& interfaces = entity.getInterfacesInformation();
+	if (!interfaces.empty())
+	{
+		return interfaces.begin()->second.macAddress;
+	}
+	return networkInterface::MacAddress{};
+}
+
 std::uint64_t CapabilityDelegate::streamIdFor(protocol::AcmpUniqueID const talkerUniqueID) const noexcept
 {
-	// Placeholder: entity_id with the low 16 bits replaced by the stream index. Must
-	// match avtpd's on-wire stream_id for the listener to actually receive (wired from
-	// the compiled profile in M5).
-	return (_entityID.getValue() & ~static_cast<std::uint64_t>(0xFFFFu)) | static_cast<std::uint64_t>(talkerUniqueID);
+	// Standard AVTP stream_id = talker MAC (48 bits) << 16 | stream index. This is what
+	// avtpd transmits with, so a listener that connects via this response will receive.
+	std::uint64_t macU48 = 0u;
+	for (auto const octet : _talkerMac)
+	{
+		macU48 = (macU48 << 8) | static_cast<std::uint64_t>(octet);
+	}
+	return (macU48 << 16) | static_cast<std::uint64_t>(talkerUniqueID);
 }
 
 networkInterface::MacAddress CapabilityDelegate::streamDestMacFor(protocol::AcmpUniqueID const talkerUniqueID) const noexcept

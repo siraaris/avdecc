@@ -83,9 +83,13 @@ private:
 	/* ACMP talker state machine helpers                                          */
 	/* ************************************************************************** */
 	std::uint16_t streamOutputCount() const noexcept;
-	// Placeholder derivations (must match avtpd's on-wire values; wired from the
-	// compiled profile in M5). stream_id = entity_id with the low 16 bits = stream
-	// index; dest_mac = avtpd's static-MAAP base + stream index; vlan = SR class A.
+	static networkInterface::MacAddress talkerMacFromEntity(Entity const& entity) noexcept;
+	// On-wire stream identifiers, matching avtpd for the default split32 profile:
+	//   stream_id = talker MAC (6 bytes) << 16 | stream index   (standard AVTP stream_id)
+	//   dest_mac  = avtpd static-MAAP base 91:e0:f0:00:fe:00 + stream index
+	//   vlan      = 2 (SR class A)
+	// dest_mac base + vlan are still the avtpd compile defaults; an operator override of
+	// avtpd.tx.streamDestinationMacBase/vlanVid would need wiring from the profile (M5b).
 	std::uint64_t streamIdFor(protocol::AcmpUniqueID const talkerUniqueID) const noexcept;
 	networkInterface::MacAddress streamDestMacFor(protocol::AcmpUniqueID const talkerUniqueID) const noexcept;
 	void sendTalkerResponse(protocol::ProtocolInterface* const pi, protocol::Acmpdu const& command, protocol::AcmpMessageType const responseType, protocol::AcmpStatus const status, UniqueIdentifier const listenerEntityID, protocol::AcmpUniqueID const listenerUniqueID, std::uint16_t const connectionCount) const noexcept;
@@ -95,6 +99,7 @@ private:
 	/* ************************************************************************** */
 	protocol::ProtocolInterface* const _protocolInterface{ nullptr };
 	UniqueIdentifier const _entityID{ UniqueIdentifier::getNullUniqueIdentifier() };
+	networkInterface::MacAddress const _talkerMac{};
 	model::EntityTree const* const _entityModelTree{ nullptr };
 	model::AemHandler const _aemHandler;
 
