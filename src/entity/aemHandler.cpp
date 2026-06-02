@@ -194,6 +194,46 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 				}
 				return false;
 			} },
+		// 3SB additive (GH #15 / M2): dynamic AEM commands the controller (Hive) queries during
+		// enumeration. Sourced from static/derived values, since la_avdecc clears the EntityTree's
+		// nested dynamic models at entity construction (top-level dynamic is preserved).
+		// GET_CONFIGURATION
+		{ protocol::AemCommandType::GetConfiguration.getValue(),
+			[](protocol::ProtocolInterface* const pi, AemHandler const& aemHandler, protocol::AemAecpdu const& aem)
+			{
+				if (aemHandler._entityModelTree == nullptr)
+				{
+					return false;
+				}
+				auto ser = protocol::aemPayload::serializeGetConfigurationResponse(aemHandler._entityModelTree->dynamicModel.currentConfiguration);
+				LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+				return true;
+			} },
+		// GET_STREAM_FORMAT (StreamInput / StreamOutput)
+		{ protocol::AemCommandType::GetStreamFormat.getValue(),
+			[](protocol::ProtocolInterface* const pi, AemHandler const& aemHandler, protocol::AemAecpdu const& aem)
+			{
+				if (aemHandler._entityModelTree == nullptr)
+				{
+					return false;
+				}
+				auto const [descriptorType, streamIndex] = protocol::aemPayload::deserializeGetStreamFormatCommand(aem.getPayload());
+				auto const configIndex = aemHandler._entityModelTree->dynamicModel.currentConfiguration;
+				auto const streamDescriptor = (descriptorType == DescriptorType::StreamOutput) ? aemHandler.buildStreamOutputDescriptor(configIndex, streamIndex) : aemHandler.buildStreamInputDescriptor(configIndex, streamIndex);
+				auto ser = protocol::aemPayload::serializeGetStreamFormatResponse(descriptorType, streamIndex, streamDescriptor.currentFormat);
+				LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+				return true;
+			} },
+		// GET_MAX_TRANSIT_TIME (StreamOutput) - IEEE1722.1-2021. We don't track a per-stream
+		// transit time yet; report 0 so the controller stops flagging an invalid response.
+		{ protocol::AemCommandType::GetMaxTransitTime.getValue(),
+			[](protocol::ProtocolInterface* const pi, AemHandler const& /*aemHandler*/, protocol::AemAecpdu const& aem)
+			{
+				auto const [descriptorType, streamIndex] = protocol::aemPayload::deserializeGetMaxTransitTimeCommand(aem.getPayload());
+				auto ser = protocol::aemPayload::serializeGetMaxTransitTimeResponse(descriptorType, streamIndex, std::uint64_t{ 0u });
+				LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+				return true;
+			} },
 	};
 
 	auto const& it = s_Dispatch.find(aem.getCommandType().getValue());
