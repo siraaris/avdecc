@@ -29,6 +29,7 @@
 
 #include "talkerCapabilityDelegate.hpp"
 
+#include <algorithm>
 #include <exception>
 
 namespace la
@@ -60,6 +61,7 @@ CapabilityDelegate::CapabilityDelegate(protocol::ProtocolInterface* const protoc
 try
 	: _protocolInterface{ protocolInterface }
 	, _entityID{ entity.getEntityID() }
+	, _entityModelTree{ entityModelTree }
 	, _aemHandler{ entity, entityModelTree }
 {
 }
@@ -93,6 +95,123 @@ bool CapabilityDelegate::onUnhandledAecpCommand(protocol::ProtocolInterface* con
 		return _aemHandler.onUnhandledAecpAemCommand(pi, aem);
 	}
 	return false;
+}
+
+/* ************************************************************************** */
+/* ACMP talker state machine (GH #15 / M3)                                    */
+/* ************************************************************************** */
+std::uint16_t CapabilityDelegate::streamOutputCount() const noexcept
+{
+	if (_entityModelTree == nullptr)
+	{
+		return 0u;
+	}
+	auto const configIndex = _entityModelTree->dynamicModel.currentConfiguration;
+	auto const it = _entityModelTree->configurationTrees.find(configIndex);
+	if (it == _entityModelTree->configurationTrees.end())
+	{
+		return 0u;
+	}
+	return static_cast<std::uint16_t>(it->second.streamOutputModels.size());
+}
+
+std::uint64_t CapabilityDelegate::streamIdFor(protocol::AcmpUniqueID const talkerUniqueID) const noexcept
+{
+	// Placeholder: entity_id with the low 16 bits replaced by the stream index. Must
+	// match avtpd's on-wire stream_id for the listener to actually receive (wired from
+	// the compiled profile in M5).
+	return (_entityID.getValue() & ~static_cast<std::uint64_t>(0xFFFFu)) | static_cast<std::uint64_t>(talkerUniqueID);
+}
+
+networkInterface::MacAddress CapabilityDelegate::streamDestMacFor(protocol::AcmpUniqueID const talkerUniqueID) const noexcept
+{
+	// Placeholder: avtpd static-MAAP base 91:e0:f0:00:fe:00 + stream index (M5 wires the real value).
+	return networkInterface::MacAddress{ { 0x91, 0xe0, 0xf0, 0x00, 0xfe, static_cast<std::uint8_t>(talkerUniqueID & 0xFFu) } };
+}
+
+void CapabilityDelegate::sendTalkerResponse(protocol::ProtocolInterface* const /*pi*/, protocol::Acmpdu const& command, protocol::AcmpMessageType const responseType, protocol::AcmpStatus const status, UniqueIdentifier const listenerEntityID, protocol::AcmpUniqueID const listenerUniqueID, std::uint16_t const connectionCount) const noexcept
+{
+	auto responseUP = protocol::Acmpdu::create();
+	auto& response = *responseUP;
+	auto const talkerUniqueID = command.getTalkerUniqueID();
+
+	response.setMessageType(responseType);
+	response.setStatus(status);
+	response.setStreamID(streamIdFor(talkerUniqueID));
+	response.setControllerEntityID(command.getControllerEntityID());
+	response.setTalkerEntityID(_entityID);
+	response.setListenerEntityID(listenerEntityID);
+	response.setTalkerUniqueID(talkerUniqueID);
+	response.setListenerUniqueID(listenerUniqueID);
+	response.setStreamDestAddress(streamDestMacFor(talkerUniqueID));
+	response.setConnectionCount(connectionCount);
+	response.setSequenceID(command.getSequenceID());
+	response.setFlags(command.getFlags());
+	response.setStreamVlanID(std::uint16_t{ 2u }); // SR class A (avtpd default)
+
+	_protocolInterface->sendAcmpResponse(std::move(responseUP));
+}
+
+void CapabilityDelegate::onAcmpCommand(protocol::ProtocolInterface* const pi, protocol::Acmpdu const& acmpdu) noexcept
+{
+	// Only respond to talker-side commands addressed to our entity.
+	if (acmpdu.getTalkerEntityID() != _entityID)
+	{
+		return;
+	}
+	auto const messageType = acmpdu.getMessageType();
+	if (messageType != protocol::AcmpMessageType::ConnectTxCommand && messageType != protocol::AcmpMessageType::DisconnectTxCommand && messageType != protocol::AcmpMessageType::GetTxStateCommand && messageType != protocol::AcmpMessageType::GetTxConnectionCommand)
+	{
+		return;
+	}
+
+	auto const responseType = (messageType == protocol::AcmpMessageType::ConnectTxCommand) ? protocol::AcmpMessageType::ConnectTxResponse : (messageType == protocol::AcmpMessageType::DisconnectTxCommand) ? protocol::AcmpMessageType::DisconnectTxResponse : (messageType == protocol::AcmpMessageType::GetTxStateCommand) ? protocol::AcmpMessageType::GetTxStateResponse : protocol::AcmpMessageType::GetTxConnectionResponse;
+
+	auto const talkerUniqueID = acmpdu.getTalkerUniqueID();
+	auto const listenerEntityID = acmpdu.getListenerEntityID();
+	auto const listenerUniqueID = acmpdu.getListenerUniqueID();
+
+	// Validate the talker stream index.
+	if (talkerUniqueID >= streamOutputCount())
+	{
+		sendTalkerResponse(pi, acmpdu, responseType, protocol::AcmpStatus::TalkerNoStreamIndex, listenerEntityID, listenerUniqueID, 0u);
+		return;
+	}
+
+	std::lock_guard<std::mutex> const lock(_connectionsMutex);
+	auto& listeners = _connections[talkerUniqueID];
+
+	if (messageType == protocol::AcmpMessageType::ConnectTxCommand)
+	{
+		auto const found = std::find_if(listeners.begin(), listeners.end(), [&](ListenerPair const& p) { return p.entityID == listenerEntityID && p.uniqueID == listenerUniqueID; });
+		if (found == listeners.end())
+		{
+			listeners.push_back(ListenerPair{ listenerEntityID, listenerUniqueID });
+		}
+		sendTalkerResponse(pi, acmpdu, responseType, protocol::AcmpStatus::Success, listenerEntityID, listenerUniqueID, static_cast<std::uint16_t>(listeners.size()));
+	}
+	else if (messageType == protocol::AcmpMessageType::DisconnectTxCommand)
+	{
+		listeners.erase(std::remove_if(listeners.begin(), listeners.end(), [&](ListenerPair const& p) { return p.entityID == listenerEntityID && p.uniqueID == listenerUniqueID; }), listeners.end());
+		sendTalkerResponse(pi, acmpdu, responseType, protocol::AcmpStatus::Success, listenerEntityID, listenerUniqueID, static_cast<std::uint16_t>(listeners.size()));
+	}
+	else if (messageType == protocol::AcmpMessageType::GetTxStateCommand)
+	{
+		sendTalkerResponse(pi, acmpdu, responseType, protocol::AcmpStatus::Success, listenerEntityID, listenerUniqueID, static_cast<std::uint16_t>(listeners.size()));
+	}
+	else // GetTxConnectionCommand: connection_count in the command carries the requested index.
+	{
+		auto const index = acmpdu.getConnectionCount();
+		if (index < listeners.size())
+		{
+			auto const& pair = listeners[index];
+			sendTalkerResponse(pi, acmpdu, responseType, protocol::AcmpStatus::Success, pair.entityID, pair.uniqueID, static_cast<std::uint16_t>(listeners.size()));
+		}
+		else
+		{
+			sendTalkerResponse(pi, acmpdu, responseType, protocol::AcmpStatus::NoSuchConnection, listenerEntityID, listenerUniqueID, static_cast<std::uint16_t>(listeners.size()));
+		}
+	}
 }
 
 } // namespace talker
