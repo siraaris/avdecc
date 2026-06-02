@@ -90,6 +90,9 @@ private:
 	//   vlan      = 2 (SR class A)
 	// dest_mac base + vlan are still the avtpd compile defaults; an operator override of
 	// avtpd.tx.streamDestinationMacBase/vlanVid would need wiring from the profile (M5b).
+	// Map a STREAM_OUTPUT descriptor index (the ACMP talker_unique_id) to its on-wire AVTP stream
+	// uid. Identity unless setTalkerStreamOutputWireUids() registered a divergent mapping (e.g. CRF).
+	std::uint16_t wireUidFor(protocol::AcmpUniqueID const talkerUniqueID) const noexcept;
 	std::uint64_t streamIdFor(protocol::AcmpUniqueID const talkerUniqueID) const noexcept;
 	networkInterface::MacAddress streamDestMacFor(protocol::AcmpUniqueID const talkerUniqueID) const noexcept;
 	void sendTalkerResponse(protocol::ProtocolInterface* const pi, protocol::Acmpdu const& command, protocol::AcmpMessageType const responseType, protocol::AcmpStatus const status, UniqueIdentifier const listenerEntityID, protocol::AcmpUniqueID const listenerUniqueID, std::uint16_t const connectionCount) const noexcept;
@@ -101,6 +104,9 @@ private:
 	UniqueIdentifier const _entityID{ UniqueIdentifier::getNullUniqueIdentifier() };
 	networkInterface::MacAddress const _talkerMac{};
 	model::EntityTree const* const _entityModelTree{ nullptr };
+	// Per-STREAM_OUTPUT-descriptor on-wire AVTP stream uid (see setTalkerStreamOutputWireUids).
+	// Declared before _aemHandler so it is constructed first and can be handed to it.
+	std::vector<std::uint16_t> const _streamOutputWireUids;
 	model::AemHandler const _aemHandler;
 
 	// Per-talker-stream connection state: talker stream unique id -> connected listeners.

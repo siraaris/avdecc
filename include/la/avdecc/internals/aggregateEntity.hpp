@@ -46,6 +46,16 @@ namespace avdecc
 {
 namespace entity
 {
+/** 3SB additive (GH #15): register, per STREAM_OUTPUT descriptor index, the on-wire AVTP stream
+  * uid the talker responder must advertise in ACMP CONNECT_TX / GET_STREAM_INFO. The on-wire
+  * stream_id is talkerMAC(48) << 16 | uid and the SR multicast dest_mac is the MAAP base + uid.
+  * For most streams uid == descriptor index, but the data plane (avtpd) may assign a stream a uid
+  * that differs from its descriptor index (e.g. the CRF media-clock stream sits at descriptor index
+  * N yet transmits on wire uid 8) — a listener that connects then registers for the wrong stream_id
+  * and never locks. Call this BEFORE AggregateEntity::create() for the same entityID; the mapping is
+  * consumed at entity construction. A missing entry, or an index beyond the vector, means identity. */
+LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION setTalkerStreamOutputWireUids(UniqueIdentifier const entityID, std::vector<std::uint16_t> const& wireUids) noexcept;
+
 class AggregateEntity : public LocalEntity, public controller::Interface
 {
 public:

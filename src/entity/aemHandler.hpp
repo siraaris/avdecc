@@ -29,6 +29,9 @@
 #include "la/avdecc/internals/protocolInterface.hpp"
 #include "la/avdecc/internals/protocolAemAecpdu.hpp"
 
+#include <cstdint>
+#include <vector>
+
 namespace la
 {
 namespace avdecc
@@ -40,7 +43,9 @@ namespace model
 class AemHandler final
 {
 public:
-	AemHandler(entity::Entity const& entity, entity::model::EntityTree const* const entityModelTree);
+	// streamOutputWireUids (3SB additive, GH #15): per STREAM_OUTPUT descriptor index, the on-wire
+	// AVTP stream uid reported in GET_STREAM_INFO. Empty (controller use) => identity (uid = index).
+	AemHandler(entity::Entity const& entity, entity::model::EntityTree const* const entityModelTree, std::vector<std::uint16_t> streamOutputWireUids = {});
 
 	static void validateEntityModel(entity::model::EntityTree const* const entityModelTree);
 
@@ -72,6 +77,7 @@ private:
 
 	entity::Entity const& _entity;
 	entity::model::EntityTree const* _entityModelTree{ nullptr };
+	std::vector<std::uint16_t> _streamOutputWireUids;
 };
 
 } // namespace model

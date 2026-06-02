@@ -44,9 +44,10 @@ public:
 	}
 };
 
-AemHandler::AemHandler(entity::Entity const& entity, entity::model::EntityTree const* const entityModelTree)
+AemHandler::AemHandler(entity::Entity const& entity, entity::model::EntityTree const* const entityModelTree, std::vector<std::uint16_t> streamOutputWireUids)
 	: _entity{ entity }
 	, _entityModelTree{ entityModelTree }
+	, _streamOutputWireUids{ std::move(streamOutputWireUids) }
 {
 	// Valide the entity model
 	validateEntityModel(_entityModelTree);
@@ -221,6 +222,53 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 				auto const configIndex = aemHandler._entityModelTree->dynamicModel.currentConfiguration;
 				auto const streamDescriptor = (descriptorType == DescriptorType::StreamOutput) ? aemHandler.buildStreamOutputDescriptor(configIndex, streamIndex) : aemHandler.buildStreamInputDescriptor(configIndex, streamIndex);
 				auto ser = protocol::aemPayload::serializeGetStreamFormatResponse(descriptorType, streamIndex, streamDescriptor.currentFormat);
+				LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+				return true;
+			} },
+		// GET_STREAM_INFO (StreamInput / StreamOutput) - IEEE1722.1-2013 base form.
+		// Carries the on-wire stream identification (stream_id / dest_mac / format / vlan) a
+		// controller (Hive) uses to resolve a talker stream to a live, network-present node.
+		// Without it Hive cannot correlate the stream to SRP/network state and renders any
+		// connection against its "OfflineOutputStream" virtual node ("Talker not detected on the
+		// Network"). Identifiers match avtpd for the default split32 profile:
+		//   stream_id = talker MAC (6 bytes) << 16 | stream index
+		//   dest_mac  = avtpd static-MAAP base 91:e0:f0:00:fe:00 + stream index
+		//   vlan      = 2 (SR class A). dest_mac base + vlan are the avtpd compile defaults; an
+		// operator override would need wiring from the profile (tracked with M5b).
+		{ protocol::AemCommandType::GetStreamInfo.getValue(),
+			[](protocol::ProtocolInterface* const pi, AemHandler const& aemHandler, protocol::AemAecpdu const& aem)
+			{
+				if (aemHandler._entityModelTree == nullptr)
+				{
+					return false;
+				}
+				auto const [descriptorType, streamIndex] = protocol::aemPayload::deserializeGetStreamInfoCommand(aem.getPayload());
+				auto const configIndex = aemHandler._entityModelTree->dynamicModel.currentConfiguration;
+				auto const streamDescriptor = (descriptorType == DescriptorType::StreamOutput) ? aemHandler.buildStreamOutputDescriptor(configIndex, streamIndex) : aemHandler.buildStreamInputDescriptor(configIndex, streamIndex);
+
+				auto streamInfo = entity::model::StreamInfo{};
+				std::uint64_t macU48 = 0u;
+				auto const& interfaces = aemHandler._entity.getInterfacesInformation();
+				if (!interfaces.empty())
+				{
+					for (auto const octet : interfaces.begin()->second.macAddress)
+					{
+						macU48 = (macU48 << 8) | static_cast<std::uint64_t>(octet);
+					}
+				}
+				// Map descriptor index -> on-wire AVTP stream uid (identity unless the data plane
+				// numbers the stream separately, e.g. CRF). Must match the ACMP CONNECT_TX response.
+				auto const wireUid = (streamIndex < aemHandler._streamOutputWireUids.size()) ? aemHandler._streamOutputWireUids[streamIndex] : static_cast<std::uint16_t>(streamIndex);
+				streamInfo.streamFormat = streamDescriptor.currentFormat;
+				streamInfo.streamID = UniqueIdentifier{ (macU48 << 16) | static_cast<std::uint64_t>(wireUid) };
+				streamInfo.streamDestMac = networkInterface::MacAddress{ { 0x91, 0xe0, 0xf0, 0x00, 0xfe, static_cast<std::uint8_t>(wireUid & 0xFFu) } };
+				streamInfo.streamVlanID = std::uint16_t{ 2u };
+				// Flag the identification fields valid so the controller treats the stream as a real
+				// network talker. (Connected/MSRP latency need per-stream connection state we do not
+				// track in the AemHandler yet — wired with the ACMP/counters work.)
+				streamInfo.streamInfoFlags = entity::StreamInfoFlags{ entity::StreamInfoFlag::StreamFormatValid, entity::StreamInfoFlag::StreamIDValid, entity::StreamInfoFlag::StreamDestMacValid, entity::StreamInfoFlag::StreamVlanIDValid };
+
+				auto ser = protocol::aemPayload::serializeGetStreamInfoResponse(descriptorType, streamIndex, streamInfo);
 				LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
 				return true;
 			} },

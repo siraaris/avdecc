@@ -26,6 +26,7 @@
 */
 
 #include "la/avdecc/utils.hpp"
+#include "la/avdecc/internals/aggregateEntity.hpp" // setTalkerStreamOutputWireUids declaration (LA_AVDECC_API export)
 
 #include "talkerCapabilityDelegate.hpp"
 
@@ -38,8 +39,53 @@ namespace avdecc
 {
 namespace entity
 {
+/* ************************************************************************** */
+/* Talker STREAM_OUTPUT wire-uid registry (GH #15 / M5)                       */
+/* ************************************************************************** */
+// Side-channel from the daemon (which knows the data-plane stream layout) to the talker
+// CapabilityDelegate (constructed internally by AggregateEntity). Keyed by entityID, written
+// before create() and taken once at construction. See aggregateEntity.hpp for rationale.
+namespace
+{
+std::mutex& wireUidRegistryMutex() noexcept
+{
+	static std::mutex s_mutex;
+	return s_mutex;
+}
+// Keyed by the raw EntityID value (std::hash<UniqueIdentifier> is not provided).
+std::unordered_map<UniqueIdentifier::value_type, std::vector<std::uint16_t>>& wireUidRegistry() noexcept
+{
+	static std::unordered_map<UniqueIdentifier::value_type, std::vector<std::uint16_t>> s_registry;
+	return s_registry;
+}
+} // namespace
+
+void LA_AVDECC_CALL_CONVENTION setTalkerStreamOutputWireUids(UniqueIdentifier const entityID, std::vector<std::uint16_t> const& wireUids) noexcept
+{
+	auto const lock = std::lock_guard{ wireUidRegistryMutex() };
+	wireUidRegistry()[entityID.getValue()] = wireUids;
+}
+
 namespace talker
 {
+namespace
+{
+// Take (read + erase) the registered wire-uid mapping for an entity, or empty if none.
+std::vector<std::uint16_t> takeStreamOutputWireUids(UniqueIdentifier const entityID) noexcept
+{
+	auto const lock = std::lock_guard{ wireUidRegistryMutex() };
+	auto& registry = wireUidRegistry();
+	auto const it = registry.find(entityID.getValue());
+	if (it == registry.end())
+	{
+		return {};
+	}
+	auto uids = std::move(it->second);
+	registry.erase(it);
+	return uids;
+}
+} // namespace
+
 /* ************************************************************************** */
 /* Exceptions                                                                 */
 /* ************************************************************************** */
@@ -63,7 +109,8 @@ try
 	, _entityID{ entity.getEntityID() }
 	, _talkerMac{ talkerMacFromEntity(entity) }
 	, _entityModelTree{ entityModelTree }
-	, _aemHandler{ entity, entityModelTree }
+	, _streamOutputWireUids{ takeStreamOutputWireUids(entity.getEntityID()) }
+	, _aemHandler{ entity, entityModelTree, _streamOutputWireUids }
 {
 }
 catch (Exception const&)
@@ -126,22 +173,33 @@ networkInterface::MacAddress CapabilityDelegate::talkerMacFromEntity(Entity cons
 	return networkInterface::MacAddress{};
 }
 
+std::uint16_t CapabilityDelegate::wireUidFor(protocol::AcmpUniqueID const talkerUniqueID) const noexcept
+{
+	if (talkerUniqueID < _streamOutputWireUids.size())
+	{
+		return _streamOutputWireUids[talkerUniqueID];
+	}
+	return static_cast<std::uint16_t>(talkerUniqueID);
+}
+
 std::uint64_t CapabilityDelegate::streamIdFor(protocol::AcmpUniqueID const talkerUniqueID) const noexcept
 {
-	// Standard AVTP stream_id = talker MAC (48 bits) << 16 | stream index. This is what
-	// avtpd transmits with, so a listener that connects via this response will receive.
+	// Standard AVTP stream_id = talker MAC (48 bits) << 16 | on-wire stream uid. This is what
+	// avtpd transmits with, so a listener that connects via this response will receive. The wire
+	// uid differs from the descriptor index for streams the data plane numbers separately (CRF).
 	std::uint64_t macU48 = 0u;
 	for (auto const octet : _talkerMac)
 	{
 		macU48 = (macU48 << 8) | static_cast<std::uint64_t>(octet);
 	}
-	return (macU48 << 16) | static_cast<std::uint64_t>(talkerUniqueID);
+	return (macU48 << 16) | static_cast<std::uint64_t>(wireUidFor(talkerUniqueID));
 }
 
 networkInterface::MacAddress CapabilityDelegate::streamDestMacFor(protocol::AcmpUniqueID const talkerUniqueID) const noexcept
 {
-	// Placeholder: avtpd static-MAAP base 91:e0:f0:00:fe:00 + stream index (M5 wires the real value).
-	return networkInterface::MacAddress{ { 0x91, 0xe0, 0xf0, 0x00, 0xfe, static_cast<std::uint8_t>(talkerUniqueID & 0xFFu) } };
+	// avtpd static-MAAP dest_mac = base 91:e0:f0:00:fe:00 + on-wire stream uid (== descriptor index
+	// for AAF, but the data-plane CRF uid for the media-clock stream).
+	return networkInterface::MacAddress{ { 0x91, 0xe0, 0xf0, 0x00, 0xfe, static_cast<std::uint8_t>(wireUidFor(talkerUniqueID) & 0xFFu) } };
 }
 
 void CapabilityDelegate::sendTalkerResponse(protocol::ProtocolInterface* const /*pi*/, protocol::Acmpdu const& command, protocol::AcmpMessageType const responseType, protocol::AcmpStatus const status, UniqueIdentifier const listenerEntityID, protocol::AcmpUniqueID const listenerUniqueID, std::uint16_t const connectionCount) const noexcept
