@@ -43,6 +43,7 @@
 #include "aemHandler.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
@@ -108,6 +109,9 @@ private:
 	// Declared before _aemHandler so it is constructed first and can be handed to it.
 	std::vector<std::uint16_t> const _streamOutputWireUids;
 	model::AemHandler const _aemHandler;
+	// Invoked on CONNECT_TX/DISCONNECT_TX with (talker stream index, connected-listener count) to
+	// drive the avtpd transmit gate. Runs on the protocol-interface thread. See aggregateEntity.hpp.
+	std::function<void(std::uint16_t, std::uint16_t)> const _connectionObserver;
 
 	// Per-talker-stream connection state: talker stream unique id -> connected listeners.
 	struct ListenerPair

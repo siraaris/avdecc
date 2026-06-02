@@ -56,6 +56,14 @@ namespace entity
   * consumed at entity construction. A missing entry, or an index beyond the vector, means identity. */
 LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION setTalkerStreamOutputWireUids(UniqueIdentifier const entityID, std::vector<std::uint16_t> const& wireUids) noexcept;
 
+/** 3SB additive (GH #15 / M5): observer invoked when a listener connects to or disconnects from a
+  * talker STREAM_OUTPUT (ACMP CONNECT_TX / DISCONNECT_TX). Arguments: the talker stream descriptor
+  * index and the resulting connected-listener count (0 == no listeners). Used to drive the avtpd
+  * transmit gate under transmitPolicy=avdecc. Register BEFORE AggregateEntity::create(); consumed at
+  * construction. The callback runs on the protocol-interface thread — keep it short and non-blocking. */
+using TalkerConnectionObserver = std::function<void(std::uint16_t talkerUniqueID, std::uint16_t connectionCount)>;
+LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION setTalkerConnectionObserver(UniqueIdentifier const entityID, TalkerConnectionObserver observer) noexcept;
+
 class AggregateEntity : public LocalEntity, public controller::Interface
 {
 public:

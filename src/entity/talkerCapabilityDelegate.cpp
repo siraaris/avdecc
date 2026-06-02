@@ -66,6 +66,26 @@ void LA_AVDECC_CALL_CONVENTION setTalkerStreamOutputWireUids(UniqueIdentifier co
 	wireUidRegistry()[entityID.getValue()] = wireUids;
 }
 
+/* ************************************************************************** */
+/* Talker ACMP connection observer registry (GH #15 / M5)                     */
+/* ************************************************************************** */
+// Lets the daemon learn when a listener connects/disconnects from a talker stream (to drive the
+// avtpd transmit gate). Same registry pattern + lifetime as the wire-uid map above.
+namespace
+{
+std::unordered_map<UniqueIdentifier::value_type, TalkerConnectionObserver>& connectionObserverRegistry() noexcept
+{
+	static std::unordered_map<UniqueIdentifier::value_type, TalkerConnectionObserver> s_registry;
+	return s_registry;
+}
+} // namespace
+
+void LA_AVDECC_CALL_CONVENTION setTalkerConnectionObserver(UniqueIdentifier const entityID, TalkerConnectionObserver observer) noexcept
+{
+	auto const lock = std::lock_guard{ wireUidRegistryMutex() };
+	connectionObserverRegistry()[entityID.getValue()] = std::move(observer);
+}
+
 namespace talker
 {
 namespace
@@ -83,6 +103,21 @@ std::vector<std::uint16_t> takeStreamOutputWireUids(UniqueIdentifier const entit
 	auto uids = std::move(it->second);
 	registry.erase(it);
 	return uids;
+}
+
+// Take (read + erase) the registered connection observer for an entity, or empty if none.
+TalkerConnectionObserver takeTalkerConnectionObserver(UniqueIdentifier const entityID) noexcept
+{
+	auto const lock = std::lock_guard{ wireUidRegistryMutex() };
+	auto& registry = connectionObserverRegistry();
+	auto const it = registry.find(entityID.getValue());
+	if (it == registry.end())
+	{
+		return {};
+	}
+	auto observer = std::move(it->second);
+	registry.erase(it);
+	return observer;
 }
 } // namespace
 
@@ -111,6 +146,7 @@ try
 	, _entityModelTree{ entityModelTree }
 	, _streamOutputWireUids{ takeStreamOutputWireUids(entity.getEntityID()) }
 	, _aemHandler{ entity, entityModelTree, _streamOutputWireUids }
+	, _connectionObserver{ takeTalkerConnectionObserver(entity.getEntityID()) }
 {
 }
 catch (Exception const&)
@@ -262,11 +298,19 @@ void CapabilityDelegate::onAcmpCommand(protocol::ProtocolInterface* const pi, pr
 			listeners.push_back(ListenerPair{ listenerEntityID, listenerUniqueID });
 		}
 		sendTalkerResponse(pi, acmpdu, responseType, protocol::AcmpStatus::Success, listenerEntityID, listenerUniqueID, static_cast<std::uint16_t>(listeners.size()));
+		if (_connectionObserver)
+		{
+			_connectionObserver(talkerUniqueID, static_cast<std::uint16_t>(listeners.size()));
+		}
 	}
 	else if (messageType == protocol::AcmpMessageType::DisconnectTxCommand)
 	{
 		listeners.erase(std::remove_if(listeners.begin(), listeners.end(), [&](ListenerPair const& p) { return p.entityID == listenerEntityID && p.uniqueID == listenerUniqueID; }), listeners.end());
 		sendTalkerResponse(pi, acmpdu, responseType, protocol::AcmpStatus::Success, listenerEntityID, listenerUniqueID, static_cast<std::uint16_t>(listeners.size()));
+		if (_connectionObserver)
+		{
+			_connectionObserver(talkerUniqueID, static_cast<std::uint16_t>(listeners.size()));
+		}
 	}
 	else if (messageType == protocol::AcmpMessageType::GetTxStateCommand)
 	{
