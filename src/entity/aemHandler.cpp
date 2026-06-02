@@ -336,6 +336,21 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 				LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
 				return true;
 			} },
+		// REGISTER_/DEREGISTER_UNSOLICITED_NOTIFICATION - mandatory for Milan (1.3 Clause 5.4.2.21).
+		// Acknowledge with Success (no command-specific data) so a controller can subscribe; actually
+		// pushing unsolicited notifications on state changes is a later enhancement.
+		{ protocol::AemCommandType::RegisterUnsolicitedNotification.getValue(),
+			[](protocol::ProtocolInterface* const pi, AemHandler const& /*aemHandler*/, protocol::AemAecpdu const& aem)
+			{
+				LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, nullptr, 0u);
+				return true;
+			} },
+		{ protocol::AemCommandType::DeregisterUnsolicitedNotification.getValue(),
+			[](protocol::ProtocolInterface* const pi, AemHandler const& /*aemHandler*/, protocol::AemAecpdu const& aem)
+			{
+				LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, nullptr, 0u);
+				return true;
+			} },
 	};
 
 	auto const& it = s_Dispatch.find(aem.getCommandType().getValue());
