@@ -282,6 +282,35 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 				LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
 				return true;
 			} },
+		// GET_AVB_INFO (AvbInterface) - reports the interface's live gPTP grandmaster + domain. A
+		// controller (Hive) compares the talker's and listener's grandmaster to decide same-domain;
+		// without it our grandmaster reads null and every connection is flagged WrongDomain. The GM is
+		// carried on the entity's InterfaceInformation (the daemon reads it from the gPTP SHM and sets
+		// it before construction); la_avdecc clears nested descriptor dynamic models, so source it here.
+		{ protocol::AemCommandType::GetAvbInfo.getValue(),
+			[](protocol::ProtocolInterface* const pi, AemHandler const& aemHandler, protocol::AemAecpdu const& aem)
+			{
+				auto const [descriptorType, avbInterfaceIndex] = protocol::aemPayload::deserializeGetAvbInfoCommand(aem.getPayload());
+				auto avbInfo = entity::model::AvbInfo{};
+				auto const& interfaces = aemHandler._entity.getInterfacesInformation();
+				if (!interfaces.empty())
+				{
+					auto const& info = interfaces.begin()->second;
+					if (info.gptpGrandmasterID)
+					{
+						avbInfo.gptpGrandmasterID = *info.gptpGrandmasterID;
+					}
+					if (info.gptpDomainNumber)
+					{
+						avbInfo.gptpDomainNumber = *info.gptpDomainNumber;
+					}
+				}
+				avbInfo.propagationDelay = 0u;
+				avbInfo.flags = entity::AvbInfoFlags{ entity::AvbInfoFlag::AsCapable, entity::AvbInfoFlag::GptpEnabled, entity::AvbInfoFlag::SrpEnabled };
+				auto ser = protocol::aemPayload::serializeGetAvbInfoResponse(descriptorType, avbInterfaceIndex, avbInfo);
+				LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+				return true;
+			} },
 	};
 
 	auto const& it = s_Dispatch.find(aem.getCommandType().getValue());
