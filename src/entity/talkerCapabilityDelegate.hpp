@@ -38,6 +38,7 @@
 
 #include "la/avdecc/internals/entityModelTree.hpp"
 #include "la/avdecc/internals/protocolAcmpdu.hpp"
+#include "la/avdecc/internals/protocolMvuAecpdu.hpp"
 
 #include "entityImpl.hpp"
 #include "aemHandler.hpp"
@@ -77,6 +78,8 @@ private:
 	/* ************************************************************************** */
 	/* **** AECP notifications **** */
 	virtual bool onUnhandledAecpCommand(protocol::ProtocolInterface* const pi, protocol::Aecpdu const& aecpdu) noexcept override;
+	// Milan Vendor Unique (MVU) commands — GET_MILAN_INFO declares Milan compliance (GH #15 / M4).
+	virtual bool onUnhandledAecpVuCommand(protocol::ProtocolInterface* const pi, protocol::VuAecpdu::ProtocolIdentifier const& protocolIdentifier, protocol::Aecpdu const& aecpdu) noexcept override;
 	/* **** ACMP notifications **** */
 	virtual void onAcmpCommand(protocol::ProtocolInterface* const pi, protocol::Acmpdu const& acmpdu) noexcept override;
 
@@ -84,6 +87,8 @@ private:
 	/* ACMP talker state machine helpers                                          */
 	/* ************************************************************************** */
 	std::uint16_t streamOutputCount() const noexcept;
+	// Build + send the GET_MILAN_INFO response (Milan compliance declaration).
+	void sendMilanInfoResponse(protocol::ProtocolInterface* const pi, protocol::MvuAecpdu const& command) const noexcept;
 	static networkInterface::MacAddress talkerMacFromEntity(Entity const& entity) noexcept;
 	// On-wire stream identifiers, matching avtpd for the default split32 profile:
 	//   stream_id = talker MAC (6 bytes) << 16 | stream index   (standard AVTP stream_id)

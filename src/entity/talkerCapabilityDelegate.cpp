@@ -29,6 +29,7 @@
 #include "la/avdecc/internals/aggregateEntity.hpp" // setTalkerStreamOutputWireUids declaration (LA_AVDECC_API export)
 
 #include "talkerCapabilityDelegate.hpp"
+#include "protocol/protocolMvuPayloads.hpp"
 
 #include <algorithm>
 #include <exception>
@@ -212,6 +213,57 @@ bool CapabilityDelegate::onUnhandledAecpCommand(protocol::ProtocolInterface* con
 		return _aemHandler.onUnhandledAecpAemCommand(pi, aem);
 	}
 	return false;
+}
+
+/* ************************************************************************** */
+/* Milan Vendor Unique (MVU) — GET_MILAN_INFO (GH #15 / M4)                    */
+/* ************************************************************************** */
+bool CapabilityDelegate::onUnhandledAecpVuCommand(protocol::ProtocolInterface* const pi, protocol::VuAecpdu::ProtocolIdentifier const& protocolIdentifier, protocol::Aecpdu const& aecpdu) noexcept
+{
+	if (!(protocolIdentifier == protocol::MvuAecpdu::ProtocolID))
+	{
+		return false;
+	}
+	auto const& mvu = static_cast<protocol::MvuAecpdu const&>(aecpdu);
+	if (mvu.getCommandType() == protocol::MvuCommandType::GetMilanInfo)
+	{
+		sendMilanInfoResponse(pi, mvu);
+		return true;
+	}
+	// Other MVU commands (system unique id, media-clock-reference, stream binding) are not
+	// implemented; returning false makes the local entity reflect a NotImplemented MVU response.
+	return false;
+}
+
+void CapabilityDelegate::sendMilanInfoResponse(protocol::ProtocolInterface* const pi, protocol::MvuAecpdu const& command) const noexcept
+{
+	try
+	{
+		// 3SB talker Milan profile: Milan-compatible (protocolVersion 1), signals channel presence.
+		auto info = model::MilanInfo{};
+		info.protocolVersion = 1u;
+		info.featuresFlags = entity::MilanInfoFeaturesFlags{ entity::MilanInfoFeaturesFlag::TalkerSignalPresence };
+		info.certificationVersion = model::MilanVersion{}; // 0 — uncertified
+		info.specificationVersion = model::MilanVersion{ 1u, 3u };
+		auto ser = protocol::mvuPayload::serializeGetMilanInfoResponse(info);
+
+		auto frame = protocol::MvuAecpdu::create(true /* isResponse */);
+		auto* const mvu = static_cast<protocol::MvuAecpdu*>(frame.get());
+		mvu->setSrcAddress(pi->getMacAddress());
+		mvu->setDestAddress(command.getSrcAddress());
+		mvu->setStatus(protocol::AecpStatus::Success);
+		mvu->setTargetEntityID(command.getTargetEntityID());
+		mvu->setControllerEntityID(command.getControllerEntityID());
+		mvu->setSequenceID(command.getSequenceID());
+		mvu->setUnsolicited(false);
+		mvu->setCommandType(protocol::MvuCommandType::GetMilanInfo);
+		mvu->setCommandSpecificData(ser.data(), ser.size());
+
+		pi->sendAecpResponse(std::move(frame));
+	}
+	catch (...)
+	{
+	}
 }
 
 /* ************************************************************************** */
