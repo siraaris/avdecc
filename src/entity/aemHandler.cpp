@@ -346,6 +346,20 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 					LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
 					return true;
 				}
+				// STREAM_INPUT counters (the CRF media clock input) are mandatory for Milan too. Report
+				// a healthy, media-locked input: MediaLocked=1 (bit 0), MediaUnlocked=0 (bit 1),
+				// StreamInterrupted=0 (bit 2), SeqNumMismatch=0 (bit 3).
+				if (descriptorType == DescriptorType::StreamInput)
+				{
+					auto const set = [&](unsigned bit, std::uint32_t value) { counters[bit] = value; validCounters |= (std::uint32_t{ 1u } << bit); };
+					set(0, 1u); // MediaLocked
+					set(1, 0u); // MediaUnlocked
+					set(2, 0u); // StreamInterrupted
+					set(3, 0u); // SeqNumMismatch
+					auto ser = protocol::aemPayload::serializeGetCountersResponse(descriptorType, descriptorIndex, validCounters, counters);
+					LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+					return true;
+				}
 				if (descriptorType != DescriptorType::StreamOutput || !aemHandler._countersProvider)
 				{
 					LocalEntityImpl<>::reflectAecpCommand(pi, aem, protocol::AemAecpStatus::NotImplemented);
