@@ -335,6 +335,17 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 					LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
 					return true;
 				}
+				// CLOCK_DOMAIN counters are likewise mandatory for Milan. Report a locked clock domain:
+				// Locked=1 (bit 0), Unlocked=0 (bit 1).
+				if (descriptorType == DescriptorType::ClockDomain)
+				{
+					auto const set = [&](unsigned bit, std::uint32_t value) { counters[bit] = value; validCounters |= (std::uint32_t{ 1u } << bit); };
+					set(0, 1u); // Locked
+					set(1, 0u); // Unlocked
+					auto ser = protocol::aemPayload::serializeGetCountersResponse(descriptorType, descriptorIndex, validCounters, counters);
+					LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+					return true;
+				}
 				if (descriptorType != DescriptorType::StreamOutput || !aemHandler._countersProvider)
 				{
 					LocalEntityImpl<>::reflectAecpCommand(pi, aem, protocol::AemAecpStatus::NotImplemented);
