@@ -320,13 +320,26 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 			[](protocol::ProtocolInterface* const pi, AemHandler const& aemHandler, protocol::AemAecpdu const& aem)
 			{
 				auto const [descriptorType, descriptorIndex] = protocol::aemPayload::deserializeGetCountersCommand(aem.getPayload());
+				auto validCounters = entity::model::DescriptorCounterValidFlag{ 0u };
+				auto counters = entity::model::DescriptorCounters{};
+				// AVB_INTERFACE counters are also mandatory for Milan (1.3 Clause 5.4.4). We don't
+				// track link/GM-change events precisely; report a stable, synced interface: LinkUp=1
+				// (bit 0), LinkDown=0 (bit 1), GptpGmChanged=0 (bit 5).
+				if (descriptorType == DescriptorType::AvbInterface)
+				{
+					auto const set = [&](unsigned bit, std::uint32_t value) { counters[bit] = value; validCounters |= (std::uint32_t{ 1u } << bit); };
+					set(0, 1u); // LinkUp
+					set(1, 0u); // LinkDown
+					set(5, 0u); // GptpGmChanged
+					auto ser = protocol::aemPayload::serializeGetCountersResponse(descriptorType, descriptorIndex, validCounters, counters);
+					LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+					return true;
+				}
 				if (descriptorType != DescriptorType::StreamOutput || !aemHandler._countersProvider)
 				{
 					LocalEntityImpl<>::reflectAecpCommand(pi, aem, protocol::AemAecpStatus::NotImplemented);
 					return true;
 				}
-				auto validCounters = entity::model::DescriptorCounterValidFlag{ 0u };
-				auto counters = entity::model::DescriptorCounters{};
 				if (!aemHandler._countersProvider(descriptorIndex, validCounters, counters))
 				{
 					LocalEntityImpl<>::reflectAecpCommand(pi, aem, protocol::AemAecpStatus::NotImplemented);
