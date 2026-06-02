@@ -346,16 +346,24 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 					LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
 					return true;
 				}
-				// STREAM_INPUT counters (the CRF media clock input) are mandatory for Milan too. Report
-				// a healthy, media-locked input: MediaLocked=1 (bit 0), MediaUnlocked=0 (bit 1),
-				// StreamInterrupted=0 (bit 2), SeqNumMismatch=0 (bit 3).
+				// STREAM_INPUT counters (the CRF media clock input). Milan 1.3 Clause 5.3.8.10 requires
+				// the FULL mandatory set valid (s_MilanMandatoryStreamInputCounters), not a subset:
+				// MediaLocked, MediaUnlocked, StreamInterrupted, SeqNumMismatch, MediaReset,
+				// TimestampUncertain, UnsupportedFormat, LateTimestamp, EarlyTimestamp, FramesRx.
+				// Report a healthy media-locked input (MediaLocked=1, all others 0).
 				if (descriptorType == DescriptorType::StreamInput)
 				{
 					auto const set = [&](unsigned bit, std::uint32_t value) { counters[bit] = value; validCounters |= (std::uint32_t{ 1u } << bit); };
-					set(0, 1u); // MediaLocked
-					set(1, 0u); // MediaUnlocked
-					set(2, 0u); // StreamInterrupted
-					set(3, 0u); // SeqNumMismatch
+					set(0, 1u);  // MediaLocked
+					set(1, 0u);  // MediaUnlocked
+					set(2, 0u);  // StreamInterrupted
+					set(3, 0u);  // SeqNumMismatch
+					set(4, 0u);  // MediaReset
+					set(5, 0u);  // TimestampUncertain
+					set(8, 0u);  // UnsupportedFormat
+					set(9, 0u);  // LateTimestamp
+					set(10, 0u); // EarlyTimestamp
+					set(11, 0u); // FramesRx
 					auto ser = protocol::aemPayload::serializeGetCountersResponse(descriptorType, descriptorIndex, validCounters, counters);
 					LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
 					return true;
