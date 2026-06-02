@@ -87,6 +87,8 @@ private:
 	/* ACMP talker state machine helpers                                          */
 	/* ************************************************************************** */
 	std::uint16_t streamOutputCount() const noexcept;
+	// LOCK_ENTITY (mandatory for Milan) — exclusive-control lock held by one controller at a time.
+	void handleLockEntity(protocol::ProtocolInterface* const pi, protocol::AemAecpdu const& aem) noexcept;
 	// Build + send the GET_MILAN_INFO response (Milan compliance declaration).
 	void sendMilanInfoResponse(protocol::ProtocolInterface* const pi, protocol::MvuAecpdu const& command) const noexcept;
 	static networkInterface::MacAddress talkerMacFromEntity(Entity const& entity) noexcept;
@@ -126,6 +128,10 @@ private:
 	};
 	mutable std::mutex _connectionsMutex;
 	std::unordered_map<protocol::AcmpUniqueID, std::vector<ListenerPair>> _connections;
+
+	// LOCK_ENTITY state: the controller currently holding the exclusive lock (null = unlocked).
+	mutable std::mutex _lockMutex;
+	UniqueIdentifier _lockHolder{};
 };
 
 } // namespace talker

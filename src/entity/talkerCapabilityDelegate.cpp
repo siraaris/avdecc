@@ -29,6 +29,7 @@
 #include "la/avdecc/internals/aggregateEntity.hpp" // setTalkerStreamOutputWireUids declaration (LA_AVDECC_API export)
 
 #include "talkerCapabilityDelegate.hpp"
+#include "protocol/protocolAemPayloads.hpp"
 #include "protocol/protocolMvuPayloads.hpp"
 
 #include <algorithm>
@@ -208,11 +209,70 @@ bool CapabilityDelegate::onUnhandledAecpCommand(protocol::ProtocolInterface* con
 			return true;
 		}
 
+		// LOCK_ENTITY is mandatory for Milan and stateful, so handle it here (the shared AemHandler
+		// is const) rather than in the descriptor-read handler.
+		if (aem.getCommandType() == protocol::AemCommandType::LockEntity)
+		{
+			handleLockEntity(pi, aem);
+			return true;
+		}
+
 		// Delegate descriptor reads (and any other AemHandler-supported commands)
 		// to the shared AemHandler, exactly as controller::CapabilityDelegate does.
 		return _aemHandler.onUnhandledAecpAemCommand(pi, aem);
 	}
 	return false;
+}
+
+/* ************************************************************************** */
+/* LOCK_ENTITY (mandatory for Milan)                                          */
+/* ************************************************************************** */
+void CapabilityDelegate::handleLockEntity(protocol::ProtocolInterface* const pi, protocol::AemAecpdu const& aem) noexcept
+{
+	try
+	{
+		auto const [flags, lockedID, descriptorType, descriptorIndex] = protocol::aemPayload::deserializeLockEntityCommand(aem.getPayload());
+		auto const controllerID = aem.getControllerEntityID();
+
+		auto status = protocol::AemAecpStatus::Success;
+		auto responseLockedID = UniqueIdentifier{};
+		{
+			std::lock_guard<std::mutex> const lock(_lockMutex);
+			if (flags == protocol::AemLockEntityFlags::Unlock)
+			{
+				// Only the holder may unlock; a non-holder gets EntityLocked + the current holder.
+				if (!_lockHolder || _lockHolder == controllerID)
+				{
+					_lockHolder = UniqueIdentifier{};
+				}
+				else
+				{
+					status = protocol::AemAecpStatus::EntityLocked;
+					responseLockedID = _lockHolder;
+				}
+			}
+			else // Lock
+			{
+				if (!_lockHolder || _lockHolder == controllerID)
+				{
+					_lockHolder = controllerID;
+					responseLockedID = controllerID;
+				}
+				else
+				{
+					status = protocol::AemAecpStatus::EntityLocked;
+					responseLockedID = _lockHolder;
+				}
+			}
+		}
+
+		auto ser = protocol::aemPayload::serializeLockEntityResponse(flags, responseLockedID, descriptorType, descriptorIndex);
+		LocalEntityImpl<>::sendAemAecpResponse(pi, aem, status, ser.data(), ser.size());
+	}
+	catch (...)
+	{
+		LocalEntityImpl<>::reflectAecpCommand(pi, aem, protocol::AemAecpStatus::BadArguments);
+	}
 }
 
 /* ************************************************************************** */
