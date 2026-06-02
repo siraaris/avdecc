@@ -351,6 +351,23 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 				LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, nullptr, 0u);
 				return true;
 			} },
+		// GET_AS_PATH (AvbInterface) - mandatory for Milan (1.3 Clause 5.4.4). The 802.1AS path is the
+		// sequence of clock identities from this interface to the gPTP grandmaster. The host is the
+		// grandmaster here, so the path is just [grandmaster clock identity] (from the interface info).
+		{ protocol::AemCommandType::GetAsPath.getValue(),
+			[](protocol::ProtocolInterface* const pi, AemHandler const& aemHandler, protocol::AemAecpdu const& aem)
+			{
+				auto const [avbInterfaceIndex] = protocol::aemPayload::deserializeGetAsPathCommand(aem.getPayload());
+				auto asPath = entity::model::AsPath{};
+				auto const& interfaces = aemHandler._entity.getInterfacesInformation();
+				if (!interfaces.empty() && interfaces.begin()->second.gptpGrandmasterID)
+				{
+					asPath.sequence.push_back(*interfaces.begin()->second.gptpGrandmasterID);
+				}
+				auto ser = protocol::aemPayload::serializeGetAsPathResponse(avbInterfaceIndex, asPath);
+				LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+				return true;
+			} },
 	};
 
 	auto const& it = s_Dispatch.find(aem.getCommandType().getValue());
