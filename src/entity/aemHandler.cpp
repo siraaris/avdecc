@@ -44,10 +44,11 @@ public:
 	}
 };
 
-AemHandler::AemHandler(entity::Entity const& entity, entity::model::EntityTree const* const entityModelTree, std::vector<std::uint16_t> streamOutputWireUids)
+AemHandler::AemHandler(entity::Entity const& entity, entity::model::EntityTree const* const entityModelTree, std::vector<std::uint16_t> streamOutputWireUids, CountersProvider countersProvider)
 	: _entity{ entity }
 	, _entityModelTree{ entityModelTree }
 	, _streamOutputWireUids{ std::move(streamOutputWireUids) }
+	, _countersProvider{ std::move(countersProvider) }
 {
 	// Valide the entity model
 	validateEntityModel(_entityModelTree);
@@ -308,6 +309,30 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 				avbInfo.propagationDelay = 0u;
 				avbInfo.flags = entity::AvbInfoFlags{ entity::AvbInfoFlag::AsCapable, entity::AvbInfoFlag::GptpEnabled, entity::AvbInfoFlag::SrpEnabled };
 				auto ser = protocol::aemPayload::serializeGetAvbInfoResponse(descriptorType, avbInterfaceIndex, avbInfo);
+				LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+				return true;
+			} },
+		// GET_COUNTERS (StreamOutput) - reports the talker stream's counters (start/stop/frames_tx,
+		// ...). The values come from the data plane (avtpd) via the registered counters provider; the
+		// provider fills the valid-flags mask + the 32-entry array. Without a provider, or for a
+		// non-StreamOutput descriptor, respond NotImplemented.
+		{ protocol::AemCommandType::GetCounters.getValue(),
+			[](protocol::ProtocolInterface* const pi, AemHandler const& aemHandler, protocol::AemAecpdu const& aem)
+			{
+				auto const [descriptorType, descriptorIndex] = protocol::aemPayload::deserializeGetCountersCommand(aem.getPayload());
+				if (descriptorType != DescriptorType::StreamOutput || !aemHandler._countersProvider)
+				{
+					LocalEntityImpl<>::reflectAecpCommand(pi, aem, protocol::AemAecpStatus::NotImplemented);
+					return true;
+				}
+				auto validCounters = entity::model::DescriptorCounterValidFlag{ 0u };
+				auto counters = entity::model::DescriptorCounters{};
+				if (!aemHandler._countersProvider(descriptorIndex, validCounters, counters))
+				{
+					LocalEntityImpl<>::reflectAecpCommand(pi, aem, protocol::AemAecpStatus::NotImplemented);
+					return true;
+				}
+				auto ser = protocol::aemPayload::serializeGetCountersResponse(descriptorType, descriptorIndex, validCounters, counters);
 				LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
 				return true;
 			} },

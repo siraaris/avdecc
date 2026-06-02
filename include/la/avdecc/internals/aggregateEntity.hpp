@@ -64,6 +64,14 @@ LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION setTalkerStreamOutputWireUids(Uniqu
 using TalkerConnectionObserver = std::function<void(std::uint16_t talkerUniqueID, std::uint16_t connectionCount)>;
 LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION setTalkerConnectionObserver(UniqueIdentifier const entityID, TalkerConnectionObserver observer) noexcept;
 
+/** 3SB additive (GH #15 / M5): provider the talker responder calls to answer GET_COUNTERS for a
+  * STREAM_OUTPUT. Given the talker stream descriptor index, fill the valid-flags mask + the 32-entry
+  * counter array and return true (false => respond NotImplemented). Lets the daemon surface avtpd's
+  * per-stream counters. Register BEFORE AggregateEntity::create(); consumed at construction. Runs on
+  * the protocol-interface thread — keep it short and non-blocking. */
+using TalkerCountersProvider = std::function<bool(std::uint16_t talkerUniqueID, model::DescriptorCounterValidFlag& validCounters, model::DescriptorCounters& counters)>;
+LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION setTalkerCountersProvider(UniqueIdentifier const entityID, TalkerCountersProvider provider) noexcept;
+
 class AggregateEntity : public LocalEntity, public controller::Interface
 {
 public:

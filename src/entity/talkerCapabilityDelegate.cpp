@@ -86,6 +86,24 @@ void LA_AVDECC_CALL_CONVENTION setTalkerConnectionObserver(UniqueIdentifier cons
 	connectionObserverRegistry()[entityID.getValue()] = std::move(observer);
 }
 
+/* ************************************************************************** */
+/* Talker GET_COUNTERS provider registry (GH #15 / M5)                        */
+/* ************************************************************************** */
+namespace
+{
+std::unordered_map<UniqueIdentifier::value_type, TalkerCountersProvider>& countersProviderRegistry() noexcept
+{
+	static std::unordered_map<UniqueIdentifier::value_type, TalkerCountersProvider> s_registry;
+	return s_registry;
+}
+} // namespace
+
+void LA_AVDECC_CALL_CONVENTION setTalkerCountersProvider(UniqueIdentifier const entityID, TalkerCountersProvider provider) noexcept
+{
+	auto const lock = std::lock_guard{ wireUidRegistryMutex() };
+	countersProviderRegistry()[entityID.getValue()] = std::move(provider);
+}
+
 namespace talker
 {
 namespace
@@ -119,6 +137,21 @@ TalkerConnectionObserver takeTalkerConnectionObserver(UniqueIdentifier const ent
 	registry.erase(it);
 	return observer;
 }
+
+// Take (read + erase) the registered counters provider for an entity, or empty if none.
+TalkerCountersProvider takeTalkerCountersProvider(UniqueIdentifier const entityID) noexcept
+{
+	auto const lock = std::lock_guard{ wireUidRegistryMutex() };
+	auto& registry = countersProviderRegistry();
+	auto const it = registry.find(entityID.getValue());
+	if (it == registry.end())
+	{
+		return {};
+	}
+	auto provider = std::move(it->second);
+	registry.erase(it);
+	return provider;
+}
 } // namespace
 
 /* ************************************************************************** */
@@ -145,7 +178,7 @@ try
 	, _talkerMac{ talkerMacFromEntity(entity) }
 	, _entityModelTree{ entityModelTree }
 	, _streamOutputWireUids{ takeStreamOutputWireUids(entity.getEntityID()) }
-	, _aemHandler{ entity, entityModelTree, _streamOutputWireUids }
+	, _aemHandler{ entity, entityModelTree, _streamOutputWireUids, takeTalkerCountersProvider(entity.getEntityID()) }
 	, _connectionObserver{ takeTalkerConnectionObserver(entity.getEntityID()) }
 {
 }

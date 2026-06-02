@@ -30,6 +30,7 @@
 #include "la/avdecc/internals/protocolAemAecpdu.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace la
@@ -45,7 +46,10 @@ class AemHandler final
 public:
 	// streamOutputWireUids (3SB additive, GH #15): per STREAM_OUTPUT descriptor index, the on-wire
 	// AVTP stream uid reported in GET_STREAM_INFO. Empty (controller use) => identity (uid = index).
-	AemHandler(entity::Entity const& entity, entity::model::EntityTree const* const entityModelTree, std::vector<std::uint16_t> streamOutputWireUids = {});
+	// countersProvider (3SB additive, GH #15 / M5): answers STREAM_OUTPUT GET_COUNTERS; empty =>
+	// GET_COUNTERS responds NotImplemented.
+	using CountersProvider = std::function<bool(std::uint16_t talkerUniqueID, entity::model::DescriptorCounterValidFlag& validCounters, entity::model::DescriptorCounters& counters)>;
+	AemHandler(entity::Entity const& entity, entity::model::EntityTree const* const entityModelTree, std::vector<std::uint16_t> streamOutputWireUids = {}, CountersProvider countersProvider = {});
 
 	static void validateEntityModel(entity::model::EntityTree const* const entityModelTree);
 
@@ -78,6 +82,7 @@ private:
 	entity::Entity const& _entity;
 	entity::model::EntityTree const* _entityModelTree{ nullptr };
 	std::vector<std::uint16_t> _streamOutputWireUids;
+	CountersProvider _countersProvider;
 };
 
 } // namespace model
