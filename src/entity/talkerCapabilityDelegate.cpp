@@ -290,8 +290,18 @@ bool CapabilityDelegate::onUnhandledAecpVuCommand(protocol::ProtocolInterface* c
 		sendMilanInfoResponse(pi, mvu);
 		return true;
 	}
-	// Other MVU commands (system unique id, media-clock-reference, stream binding) are not
-	// implemented; returning false makes the local entity reflect a NotImplemented MVU response.
+	// Milan 1.3 mandatory dynamic info (§5.4.2): answering these keeps the controller at Milan
+	// 1.3 — a NotImplemented response makes it auto-downgrade us to 1.2. (GH #15 / #167.)
+	if (mvu.getCommandType() == protocol::MvuCommandType::GetMediaClockReferenceInfo)
+	{
+		return sendMediaClockReferenceInfoResponse(pi, mvu);
+	}
+	if (mvu.getCommandType() == protocol::MvuCommandType::GetStreamInputInfoEx)
+	{
+		return sendStreamInputInfoExResponse(pi, mvu);
+	}
+	// Other MVU commands (system unique id, stream binding) are not implemented; returning false
+	// makes the local entity reflect a NotImplemented MVU response.
 	return false;
 }
 
@@ -323,6 +333,83 @@ void CapabilityDelegate::sendMilanInfoResponse(protocol::ProtocolInterface* cons
 	}
 	catch (...)
 	{
+	}
+}
+
+bool CapabilityDelegate::sendMediaClockReferenceInfoResponse(protocol::ProtocolInterface* const pi, protocol::MvuAecpdu const& command) const noexcept
+{
+	try
+	{
+		// The 3SB talker exposes exactly one clock domain (index 0, the CRF media clock).
+		auto const [clockDomainIndex] = protocol::mvuPayload::deserializeGetMediaClockReferenceInfoCommand(command.getPayload());
+		if (clockDomainIndex != model::ClockDomainIndex{ 0u })
+		{
+			return false; // unknown clock domain -> reflect NotImplemented
+		}
+
+		// Minimal valid Milan 1.3 report: default reference priority, no user override, no domain
+		// name (flags clear). Enough to satisfy the controller's mandatory-dynamic-info check.
+		auto const flags = entity::MediaClockReferenceInfoFlags{};
+		auto const defaultMcrPrio = model::DefaultMediaClockReferencePriority::Default;
+		auto const userMcrPrio = model::MediaClockReferencePriority{ 0u };
+		auto const domainName = model::AvdeccFixedString{};
+		auto ser = protocol::mvuPayload::serializeGetMediaClockReferenceInfoResponse(clockDomainIndex, flags, defaultMcrPrio, userMcrPrio, domainName);
+
+		auto frame = protocol::MvuAecpdu::create(true /* isResponse */);
+		auto* const mvu = static_cast<protocol::MvuAecpdu*>(frame.get());
+		mvu->setSrcAddress(pi->getMacAddress());
+		mvu->setDestAddress(command.getSrcAddress());
+		mvu->setStatus(protocol::AecpStatus::Success);
+		mvu->setTargetEntityID(command.getTargetEntityID());
+		mvu->setControllerEntityID(command.getControllerEntityID());
+		mvu->setSequenceID(command.getSequenceID());
+		mvu->setUnsolicited(false);
+		mvu->setCommandType(protocol::MvuCommandType::GetMediaClockReferenceInfo);
+		mvu->setCommandSpecificData(ser.data(), ser.size());
+
+		pi->sendAecpResponse(std::move(frame));
+		return true;
+	}
+	catch (...)
+	{
+		return false;
+	}
+}
+
+bool CapabilityDelegate::sendStreamInputInfoExResponse(protocol::ProtocolInterface* const pi, protocol::MvuAecpdu const& command) const noexcept
+{
+	try
+	{
+		// The 3SB talker exposes a single STREAM_INPUT (index 0, the CRF media-clock input).
+		auto const [descriptorType, descriptorIndex] = protocol::mvuPayload::deserializeGetStreamInputInfoExCommand(command.getPayload());
+		if (descriptorType != model::DescriptorType::StreamInput || descriptorIndex != model::StreamIndex{ 0u })
+		{
+			return false; // unknown stream input -> reflect NotImplemented
+		}
+
+		// The CRF input is not an ACMP listener (no fast-connect / probing), so report the
+		// not-bound state: no talker stream, probing Disabled, ACMP Success (struct defaults).
+		auto const info = model::StreamInputInfoEx{};
+		auto ser = protocol::mvuPayload::serializeGetStreamInputInfoExResponse(descriptorType, descriptorIndex, info);
+
+		auto frame = protocol::MvuAecpdu::create(true /* isResponse */);
+		auto* const mvu = static_cast<protocol::MvuAecpdu*>(frame.get());
+		mvu->setSrcAddress(pi->getMacAddress());
+		mvu->setDestAddress(command.getSrcAddress());
+		mvu->setStatus(protocol::AecpStatus::Success);
+		mvu->setTargetEntityID(command.getTargetEntityID());
+		mvu->setControllerEntityID(command.getControllerEntityID());
+		mvu->setSequenceID(command.getSequenceID());
+		mvu->setUnsolicited(false);
+		mvu->setCommandType(protocol::MvuCommandType::GetStreamInputInfoEx);
+		mvu->setCommandSpecificData(ser.data(), ser.size());
+
+		pi->sendAecpResponse(std::move(frame));
+		return true;
+	}
+	catch (...)
+	{
+		return false;
 	}
 }
 

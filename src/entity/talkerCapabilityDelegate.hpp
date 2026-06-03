@@ -91,6 +91,10 @@ private:
 	void handleLockEntity(protocol::ProtocolInterface* const pi, protocol::AemAecpdu const& aem) noexcept;
 	// Build + send the GET_MILAN_INFO response (Milan compliance declaration).
 	void sendMilanInfoResponse(protocol::ProtocolInterface* const pi, protocol::MvuAecpdu const& command) const noexcept;
+	// Milan 1.3 mandatory dynamic info (GH #15 / #167). Each returns true if it answered, or
+	// false to let the local entity reflect NotImplemented (e.g. an unknown descriptor index).
+	bool sendMediaClockReferenceInfoResponse(protocol::ProtocolInterface* const pi, protocol::MvuAecpdu const& command) const noexcept;
+	bool sendStreamInputInfoExResponse(protocol::ProtocolInterface* const pi, protocol::MvuAecpdu const& command) const noexcept;
 	static networkInterface::MacAddress talkerMacFromEntity(Entity const& entity) noexcept;
 	// On-wire stream identifiers, matching avtpd for the default split32 profile:
 	//   stream_id = talker MAC (6 bytes) << 16 | stream index   (standard AVTP stream_id)
