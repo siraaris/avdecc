@@ -136,6 +136,25 @@ private:
 	// LOCK_ENTITY state: the controller currently holding the exclusive lock (null = unlocked).
 	mutable std::mutex _lockMutex;
 	UniqueIdentifier _lockHolder{};
+
+	/* ************************************************************************** */
+	/* Unsolicited notifications (GH #15 / #169)                                  */
+	/* ************************************************************************** */
+	// Controllers that subscribed via REGISTER_UNSOLICITED_NOTIFICATION. We push REAL unsolicited
+	// AEM responses (e.g. on LOCK_ENTITY state changes) to these, not just ack the registration.
+	struct UnsolicitedSubscriber
+	{
+		networkInterface::MacAddress mac{};
+		std::uint16_t nextSequenceID{ 0u }; // independent per-controller AECP sequence id for pushes
+	};
+	mutable std::mutex _unsolicitedMutex;
+	std::unordered_map<UniqueIdentifier, UnsolicitedSubscriber, UniqueIdentifier::hash> _unsolicitedSubscribers;
+
+	void registerUnsolicited(UniqueIdentifier const controllerID, networkInterface::MacAddress const& mac) noexcept;
+	void deregisterUnsolicited(UniqueIdentifier const controllerID) noexcept;
+	// Push an unsolicited AEM response to every subscribed controller except excludeController (the
+	// one whose command triggered the change — it already gets the solicited response).
+	void pushUnsolicitedAemNotification(protocol::ProtocolInterface* const pi, protocol::AemCommandType const commandType, UniqueIdentifier const excludeController, std::uint8_t const* const payload, size_t const payloadLength) noexcept;
 };
 
 } // namespace talker

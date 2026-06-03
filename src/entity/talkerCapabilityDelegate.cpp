@@ -217,6 +217,22 @@ bool CapabilityDelegate::onUnhandledAecpCommand(protocol::ProtocolInterface* con
 			return true;
 		}
 
+		// REGISTER/DEREGISTER_UNSOLICITED_NOTIFICATION: track the subscriber (the shared const
+		// AemHandler can't), then ack. We push real unsolicited notifications to subscribers on
+		// state changes (e.g. LOCK_ENTITY) — see pushUnsolicitedAemNotification. (GH #15 / #169.)
+		if (aem.getCommandType() == protocol::AemCommandType::RegisterUnsolicitedNotification)
+		{
+			registerUnsolicited(aem.getControllerEntityID(), aem.getSrcAddress());
+			LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, nullptr, 0u);
+			return true;
+		}
+		if (aem.getCommandType() == protocol::AemCommandType::DeregisterUnsolicitedNotification)
+		{
+			deregisterUnsolicited(aem.getControllerEntityID());
+			LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, nullptr, 0u);
+			return true;
+		}
+
 		// Delegate descriptor reads (and any other AemHandler-supported commands)
 		// to the shared AemHandler, exactly as controller::CapabilityDelegate does.
 		return _aemHandler.onUnhandledAecpAemCommand(pi, aem);
@@ -268,10 +284,70 @@ void CapabilityDelegate::handleLockEntity(protocol::ProtocolInterface* const pi,
 
 		auto ser = protocol::aemPayload::serializeLockEntityResponse(flags, responseLockedID, descriptorType, descriptorIndex);
 		LocalEntityImpl<>::sendAemAecpResponse(pi, aem, status, ser.data(), ser.size());
+
+		// On a successful lock/unlock, push an unsolicited LOCK_ENTITY notification to every other
+		// subscribed controller so they learn the new lock holder without polling. (GH #15 / #169.)
+		if (status == protocol::AemAecpStatus::Success)
+		{
+			pushUnsolicitedAemNotification(pi, protocol::AemCommandType::LockEntity, controllerID, ser.data(), ser.size());
+		}
 	}
 	catch (...)
 	{
 		LocalEntityImpl<>::reflectAecpCommand(pi, aem, protocol::AemAecpStatus::BadArguments);
+	}
+}
+
+/* ************************************************************************** */
+/* Unsolicited notifications (GH #15 / #169)                                  */
+/* ************************************************************************** */
+void CapabilityDelegate::registerUnsolicited(UniqueIdentifier const controllerID, networkInterface::MacAddress const& mac) noexcept
+{
+	if (!controllerID)
+	{
+		return;
+	}
+	std::lock_guard<std::mutex> const lock(_unsolicitedMutex);
+	// operator[] preserves an existing subscriber's sequence-id counter on re-registration.
+	_unsolicitedSubscribers[controllerID].mac = mac;
+}
+
+void CapabilityDelegate::deregisterUnsolicited(UniqueIdentifier const controllerID) noexcept
+{
+	std::lock_guard<std::mutex> const lock(_unsolicitedMutex);
+	_unsolicitedSubscribers.erase(controllerID);
+}
+
+void CapabilityDelegate::pushUnsolicitedAemNotification(protocol::ProtocolInterface* const pi, protocol::AemCommandType const commandType, UniqueIdentifier const excludeController, std::uint8_t const* const payload, size_t const payloadLength) noexcept
+{
+	std::lock_guard<std::mutex> const lock(_unsolicitedMutex);
+	for (auto& [controllerID, subscriber] : _unsolicitedSubscribers)
+	{
+		if (controllerID == excludeController)
+		{
+			continue; // the initiating controller already received the solicited response
+		}
+		try
+		{
+			auto frame = protocol::AemAecpdu::create(true /* isResponse */);
+			auto* const aem = static_cast<protocol::AemAecpdu*>(frame.get());
+			aem->setSrcAddress(pi->getMacAddress());
+			aem->setDestAddress(subscriber.mac);
+			aem->setStatus(protocol::AemAecpStatus::Success);
+			aem->setTargetEntityID(_entityID);
+			aem->setControllerEntityID(controllerID);
+			aem->setSequenceID(subscriber.nextSequenceID++);
+			aem->setUnsolicited(true);
+			aem->setCommandType(commandType);
+			if (payload != nullptr && payloadLength != 0u)
+			{
+				aem->setCommandSpecificData(payload, payloadLength);
+			}
+			pi->sendAecpResponse(std::move(frame));
+		}
+		catch (...)
+		{
+		}
 	}
 }
 
