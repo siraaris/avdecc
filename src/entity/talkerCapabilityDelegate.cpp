@@ -60,6 +60,15 @@ std::unordered_map<UniqueIdentifier::value_type, std::vector<std::uint16_t>>& wi
 	static std::unordered_map<UniqueIdentifier::value_type, std::vector<std::uint16_t>> s_registry;
 	return s_registry;
 }
+// Per-STREAM_OUTPUT presentation time offset (ns). Set by the daemon before construction; consumed
+// by AemHandler for GET_STREAM_INFO msrp_accumulated_latency + GET_MAX_TRANSIT_TIME. Same registry
+// pattern + lifetime as the wire-uid map (the descriptor dynamic model is cleared by la_avdecc, so
+// this value must live on the handler, not the tree).
+std::unordered_map<UniqueIdentifier::value_type, std::vector<std::uint32_t>>& presentationOffsetRegistry() noexcept
+{
+	static std::unordered_map<UniqueIdentifier::value_type, std::vector<std::uint32_t>> s_registry;
+	return s_registry;
+}
 } // namespace
 
 void LA_AVDECC_CALL_CONVENTION setTalkerStreamOutputWireUids(UniqueIdentifier const entityID, std::vector<std::uint16_t> const& wireUids) noexcept
@@ -104,6 +113,12 @@ void LA_AVDECC_CALL_CONVENTION setTalkerCountersProvider(UniqueIdentifier const 
 {
 	auto const lock = std::lock_guard{ wireUidRegistryMutex() };
 	countersProviderRegistry()[entityID.getValue()] = std::move(provider);
+}
+
+void LA_AVDECC_CALL_CONVENTION setTalkerStreamOutputPresentationOffsetsNs(UniqueIdentifier const entityID, std::vector<std::uint32_t> const& offsetsNs) noexcept
+{
+	auto const lock = std::lock_guard{ wireUidRegistryMutex() };
+	presentationOffsetRegistry()[entityID.getValue()] = offsetsNs;
 }
 
 namespace talker
@@ -154,6 +169,21 @@ TalkerCountersProvider takeTalkerCountersProvider(UniqueIdentifier const entityI
 	registry.erase(it);
 	return provider;
 }
+
+// Take (read + erase) the registered per-stream presentation time offsets for an entity, or empty.
+std::vector<std::uint32_t> takeStreamOutputPresentationOffsetsNs(UniqueIdentifier const entityID) noexcept
+{
+	auto const lock = std::lock_guard{ wireUidRegistryMutex() };
+	auto& registry = presentationOffsetRegistry();
+	auto const it = registry.find(entityID.getValue());
+	if (it == registry.end())
+	{
+		return {};
+	}
+	auto offsets = std::move(it->second);
+	registry.erase(it);
+	return offsets;
+}
 } // namespace
 
 /* ************************************************************************** */
@@ -180,7 +210,7 @@ try
 	, _talkerMac{ talkerMacFromEntity(entity) }
 	, _entityModelTree{ entityModelTree }
 	, _streamOutputWireUids{ takeStreamOutputWireUids(entity.getEntityID()) }
-	, _aemHandler{ entity, entityModelTree, _streamOutputWireUids, takeTalkerCountersProvider(entity.getEntityID()) }
+	, _aemHandler{ entity, entityModelTree, _streamOutputWireUids, takeTalkerCountersProvider(entity.getEntityID()), takeStreamOutputPresentationOffsetsNs(entity.getEntityID()) }
 	, _connectionObserver{ takeTalkerConnectionObserver(entity.getEntityID()) }
 {
 }

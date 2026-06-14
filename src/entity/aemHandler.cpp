@@ -25,6 +25,7 @@
 #include "aemHandler.hpp"
 #include "entityImpl.hpp"
 #include "protocol/protocolAemPayloads.hpp"
+#include <limits>
 
 
 namespace la
@@ -44,11 +45,12 @@ public:
 	}
 };
 
-AemHandler::AemHandler(entity::Entity const& entity, entity::model::EntityTree const* const entityModelTree, std::vector<std::uint16_t> streamOutputWireUids, CountersProvider countersProvider)
+AemHandler::AemHandler(entity::Entity const& entity, entity::model::EntityTree const* const entityModelTree, std::vector<std::uint16_t> streamOutputWireUids, CountersProvider countersProvider, std::vector<std::uint32_t> streamOutputPresentationOffsetsNs)
 	: _entity{ entity }
 	, _entityModelTree{ entityModelTree }
 	, _streamOutputWireUids{ std::move(streamOutputWireUids) }
 	, _countersProvider{ std::move(countersProvider) }
+	, _streamOutputPresentationOffsetsNs{ std::move(streamOutputPresentationOffsetsNs) }
 {
 	// Valide the entity model
 	validateEntityModel(_entityModelTree);
@@ -265,21 +267,39 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 				streamInfo.streamDestMac = networkInterface::MacAddress{ { 0x91, 0xe0, 0xf0, 0x00, 0xfe, static_cast<std::uint8_t>(wireUid & 0xFFu) } };
 				streamInfo.streamVlanID = std::uint16_t{ 2u };
 				// Flag the identification fields valid so the controller treats the stream as a real
-				// network talker. (Connected/MSRP latency need per-stream connection state we do not
-				// track in the AemHandler yet — wired with the ACMP/counters work.)
-				streamInfo.streamInfoFlags = entity::StreamInfoFlags{ entity::StreamInfoFlag::StreamFormatValid, entity::StreamInfoFlag::StreamIDValid, entity::StreamInfoFlag::StreamDestMacValid, entity::StreamInfoFlag::StreamVlanIDValid };
+				// network talker.
+				auto streamInfoFlags = entity::StreamInfoFlags{ entity::StreamInfoFlag::StreamFormatValid, entity::StreamInfoFlag::StreamIDValid, entity::StreamInfoFlag::StreamDestMacValid, entity::StreamInfoFlag::StreamVlanIDValid };
+				// Presentation time offset (talker's presentation time) -> msrp_accumulated_latency,
+				// so a controller (e.g. RME AVB Controller) can read it. Sourced from the STREAM_OUTPUT
+				// dynamic model set by the talker daemon; only flagged valid when known and non-zero.
+				if (descriptorType == DescriptorType::StreamOutput)
+				{
+					auto const presentationNs = aemHandler.streamOutputPresentationTimeOffsetNs(streamIndex);
+					if (presentationNs > 0u)
+					{
+						streamInfo.msrpAccumulatedLatency = presentationNs;
+						streamInfoFlags.set(entity::StreamInfoFlag::MsrpAccLatValid);
+					}
+				}
+				streamInfo.streamInfoFlags = streamInfoFlags;
 
 				auto ser = protocol::aemPayload::serializeGetStreamInfoResponse(descriptorType, streamIndex, streamInfo);
 				LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
 				return true;
 			} },
-		// GET_MAX_TRANSIT_TIME (StreamOutput) - IEEE1722.1-2021. We don't track a per-stream
-		// transit time yet; report 0 so the controller stops flagging an invalid response.
+		// GET_MAX_TRANSIT_TIME (StreamOutput) - IEEE1722.1-2021. Report the STREAM_OUTPUT's
+		// presentation time offset (ns) from the dynamic model (set by the talker daemon), so a
+		// controller can read the talker's transit/presentation time. 0 when unknown.
 		{ protocol::AemCommandType::GetMaxTransitTime.getValue(),
-			[](protocol::ProtocolInterface* const pi, AemHandler const& /*aemHandler*/, protocol::AemAecpdu const& aem)
+			[](protocol::ProtocolInterface* const pi, AemHandler const& aemHandler, protocol::AemAecpdu const& aem)
 			{
 				auto const [descriptorType, streamIndex] = protocol::aemPayload::deserializeGetMaxTransitTimeCommand(aem.getPayload());
-				auto ser = protocol::aemPayload::serializeGetMaxTransitTimeResponse(descriptorType, streamIndex, std::uint64_t{ 0u });
+				std::uint64_t maxTransitNs = 0u;
+				if (descriptorType == DescriptorType::StreamOutput)
+				{
+					maxTransitNs = static_cast<std::uint64_t>(aemHandler.streamOutputPresentationTimeOffsetNs(streamIndex));
+				}
+				auto ser = protocol::aemPayload::serializeGetMaxTransitTimeResponse(descriptorType, streamIndex, maxTransitNs);
 				LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
 				return true;
 			} },
@@ -690,6 +710,17 @@ StreamDescriptor AemHandler::buildStreamInputDescriptor(ConfigurationIndex const
 		throw NoSuchDescriptorException{};
 	}
 	return makeStreamDescriptor(it->second.staticModel, it->second.dynamicModel);
+}
+
+std::uint32_t AemHandler::streamOutputPresentationTimeOffsetNs(StreamIndex const streamIndex) const
+{
+	// Indexed by STREAM_OUTPUT descriptor index; registered by the daemon
+	// (setTalkerStreamOutputPresentationOffsetsNs). 0 when unset / out of range.
+	if (streamIndex >= _streamOutputPresentationOffsetsNs.size())
+	{
+		return 0u;
+	}
+	return _streamOutputPresentationOffsetsNs[streamIndex];
 }
 
 AvbInterfaceDescriptor AemHandler::buildAvbInterfaceDescriptor(ConfigurationIndex const configIndex, AvbInterfaceIndex const avbInterfaceIndex) const

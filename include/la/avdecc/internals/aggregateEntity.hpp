@@ -56,6 +56,13 @@ namespace entity
   * consumed at entity construction. A missing entry, or an index beyond the vector, means identity. */
 LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION setTalkerStreamOutputWireUids(UniqueIdentifier const entityID, std::vector<std::uint16_t> const& wireUids) noexcept;
 
+/** 3SB additive: per-STREAM_OUTPUT presentation time offset (ns), indexed by descriptor index, used
+  * to populate GET_STREAM_INFO msrp_accumulated_latency (+ MsrpAccLatValid) and GET_MAX_TRANSIT_TIME
+  * so a controller can read the talker's presentation time. Call BEFORE AggregateEntity::create();
+  * consumed at construction (the descriptor dynamic model is cleared by la_avdecc, so the value must
+  * live on the handler). A missing entry, or an index beyond the vector, or 0, means "not reported". */
+LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION setTalkerStreamOutputPresentationOffsetsNs(UniqueIdentifier const entityID, std::vector<std::uint32_t> const& offsetsNs) noexcept;
+
 /** 3SB additive (GH #15 / M5): observer invoked when a listener connects to or disconnects from a
   * talker STREAM_OUTPUT (ACMP CONNECT_TX / DISCONNECT_TX). Arguments: the talker stream descriptor
   * index and the resulting connected-listener count (0 == no listeners). Used to drive the avtpd

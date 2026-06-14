@@ -49,7 +49,7 @@ public:
 	// countersProvider (3SB additive, GH #15 / M5): answers STREAM_OUTPUT GET_COUNTERS; empty =>
 	// GET_COUNTERS responds NotImplemented.
 	using CountersProvider = std::function<bool(std::uint16_t talkerUniqueID, entity::model::DescriptorCounterValidFlag& validCounters, entity::model::DescriptorCounters& counters)>;
-	AemHandler(entity::Entity const& entity, entity::model::EntityTree const* const entityModelTree, std::vector<std::uint16_t> streamOutputWireUids = {}, CountersProvider countersProvider = {});
+	AemHandler(entity::Entity const& entity, entity::model::EntityTree const* const entityModelTree, std::vector<std::uint16_t> streamOutputWireUids = {}, CountersProvider countersProvider = {}, std::vector<std::uint32_t> streamOutputPresentationOffsetsNs = {});
 
 	static void validateEntityModel(entity::model::EntityTree const* const entityModelTree);
 
@@ -78,11 +78,18 @@ private:
 	StreamPortDescriptor buildStreamPortOutputDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::StreamPortIndex const streamPortIndex) const;
 	AudioClusterDescriptor buildAudioClusterDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::ClusterIndex const clusterIndex) const;
 	AudioMapDescriptor buildAudioMapDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::MapIndex const mapIndex) const;
+	// Presentation time offset (nanoseconds) of a STREAM_OUTPUT, from the per-stream vector the
+	// talker daemon registered (setTalkerStreamOutputPresentationOffsetsNs). Used to populate
+	// GET_STREAM_INFO msrp_accumulated_latency and GET_MAX_TRANSIT_TIME so a controller can read the
+	// talker's presentation time. 0 if unset / index out of range. NOT read from the descriptor
+	// dynamic model — la_avdecc clears that at construction.
+	std::uint32_t streamOutputPresentationTimeOffsetNs(entity::model::StreamIndex const streamIndex) const;
 
 	entity::Entity const& _entity;
 	entity::model::EntityTree const* _entityModelTree{ nullptr };
 	std::vector<std::uint16_t> _streamOutputWireUids;
 	CountersProvider _countersProvider;
+	std::vector<std::uint32_t> _streamOutputPresentationOffsetsNs;
 };
 
 } // namespace model
