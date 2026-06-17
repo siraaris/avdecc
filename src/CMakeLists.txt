@@ -132,6 +132,7 @@ set (HEADER_FILES_ENTITY
 	entity/aggregateEntityImpl.hpp
 	entity/controllerCapabilityDelegate.hpp
 	entity/talkerCapabilityDelegate.hpp
+	entity/listenerCapabilityDelegate.hpp
 	entity/controllerEntityImpl.hpp
 )
 
@@ -142,6 +143,7 @@ set (SOURCE_FILES_ENTITY
 	entity/aggregateEntityImpl.cpp
 	entity/controllerCapabilityDelegate.cpp
 	entity/talkerCapabilityDelegate.cpp
+	entity/listenerCapabilityDelegate.cpp
 	entity/controllerEntityImpl.cpp
 	entity/entityModelControlValues.cpp
 )

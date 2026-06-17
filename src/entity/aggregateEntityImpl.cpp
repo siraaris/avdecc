@@ -28,6 +28,7 @@
 #include "aggregateEntityImpl.hpp"
 #include "controllerCapabilityDelegate.hpp"
 #include "talkerCapabilityDelegate.hpp"
+#include "listenerCapabilityDelegate.hpp"
 
 #include <exception>
 #include <cassert>
@@ -56,8 +57,10 @@ AggregateEntityImpl::AggregateEntityImpl(protocol::ProtocolInterface* const prot
 	// Entity is listener capable
 	if (commonInformation.listenerCapabilities.test(ListenerCapability::Implemented))
 	{
-		AVDECC_ASSERT(false, "TODO: AggregateEntityImpl: Handle listener capability");
-		//_listenerCapabilityDelegate = std::make_unique<listener::CapabilityDelegate>(entityID);
+		// 3SB additive (software-mode P2): listener entity-responder delegate. ADP advertise + AECP
+		// AEM responder (shared AemHandler) + MVU Milan info + the ACMP listener state machine
+		// (CONNECT_RX/DISCONNECT_RX/GET_RX_STATE). See listenerCapabilityDelegate.hpp.
+		_listenerCapabilityDelegate = std::make_unique<listener::CapabilityDelegate>(getProtocolInterface(), *this, entityModelTree);
 	}
 
 	// Entity is talker capable
