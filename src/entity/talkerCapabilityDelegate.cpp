@@ -652,7 +652,12 @@ void CapabilityDelegate::onAcmpCommand(protocol::ProtocolInterface* const pi, pr
 	}
 	else if (messageType == protocol::AcmpMessageType::GetTxStateCommand)
 	{
-		sendTalkerResponse(pi, acmpdu, responseType, protocol::AcmpStatus::Success, listenerEntityID, listenerUniqueID, static_cast<std::uint16_t>(listeners.size()));
+		// Milan 1.3 §5.5.4.3: a Milan talker MUST report connection_count = 0 in
+		// GET_TX_STATE_RESPONSE (the actual connections are enumerated via GET_TX_CONNECTION).
+		// Reporting listeners.size() here passed M4 verification only because no listener was
+		// connected at the time; once one connects, the nonzero count makes Hive flag the
+		// talker non-Milan-compliant.
+		sendTalkerResponse(pi, acmpdu, responseType, protocol::AcmpStatus::Success, listenerEntityID, listenerUniqueID, 0u);
 	}
 	else // GetTxConnectionCommand: connection_count in the command carries the requested index.
 	{
