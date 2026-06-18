@@ -399,9 +399,25 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 					LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
 					return true;
 				}
-				if (descriptorType != DescriptorType::StreamOutput || !aemHandler._countersProvider)
+				if (descriptorType != DescriptorType::StreamOutput)
 				{
 					LocalEntityImpl<>::reflectAecpCommand(pi, aem, protocol::AemAecpStatus::NotImplemented);
+					return true;
+				}
+				// STREAM_OUTPUT counters are mandatory for Milan (1.3 Clause 5.4.4). When no data-plane
+				// counters provider is registered — e.g. the software-mode listener's descriptor-only CRF
+				// media clock output — report the mandatory Milan 1.2 set with zeros (StreamStart=StreamStop
+				// =0 => not currently streaming) instead of NotImplemented, which makes Hive flag non-Milan.
+				if (!aemHandler._countersProvider)
+				{
+					auto const setOut = [&](unsigned bit, std::uint32_t value) { counters[bit] = value; validCounters |= (std::uint32_t{ 1u } << bit); };
+					setOut(0, 0u); // StreamStart
+					setOut(1, 0u); // StreamStop
+					setOut(2, 0u); // MediaReset
+					setOut(3, 0u); // TimestampUncertain
+					setOut(4, 0u); // FramesTx
+					auto ser = protocol::aemPayload::serializeGetCountersResponse(descriptorType, descriptorIndex, validCounters, counters);
+					LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
 					return true;
 				}
 				if (!aemHandler._countersProvider(descriptorIndex, validCounters, counters))
