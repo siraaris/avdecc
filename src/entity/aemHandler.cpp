@@ -411,11 +411,15 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 				if (!aemHandler._countersProvider)
 				{
 					auto const setOut = [&](unsigned bit, std::uint32_t value) { counters[bit] = value; validCounters |= (std::uint32_t{ 1u } << bit); };
+					// Milan 1.3 STREAM_OUTPUT mandatory counter positions (Clause 5.3.7.7) — NOT the Milan 1.2
+					// layout: StreamStart=0, StreamStop=1, MediaReset=3, TimestampUncertain=4, FramesTx=7.
+					// (Signal-presence 22/23 only required if the entity advertises TalkerSignalPresence; the
+					// listener does not.)
 					setOut(0, 0u); // StreamStart
 					setOut(1, 0u); // StreamStop
-					setOut(2, 0u); // MediaReset
-					setOut(3, 0u); // TimestampUncertain
-					setOut(4, 0u); // FramesTx
+					setOut(3, 0u); // MediaReset
+					setOut(4, 0u); // TimestampUncertain
+					setOut(7, 0u); // FramesTx
 					auto ser = protocol::aemPayload::serializeGetCountersResponse(descriptorType, descriptorIndex, validCounters, counters);
 					LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
 					return true;
