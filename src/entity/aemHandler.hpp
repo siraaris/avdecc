@@ -76,6 +76,7 @@ private:
 	LocaleDescriptor buildLocaleDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::LocaleIndex const localeIndex) const;
 	StringsDescriptor buildStringsDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::StringsIndex const stringsIndex) const;
 	StreamPortDescriptor buildStreamPortOutputDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::StreamPortIndex const streamPortIndex) const;
+	StreamPortDescriptor buildStreamPortInputDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::StreamPortIndex const streamPortIndex) const;
 	AudioClusterDescriptor buildAudioClusterDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::ClusterIndex const clusterIndex) const;
 	AudioMapDescriptor buildAudioMapDescriptor(entity::model::ConfigurationIndex const configIndex, entity::model::MapIndex const mapIndex) const;
 	// Presentation time offset (nanoseconds) of a STREAM_OUTPUT, from the per-stream vector the

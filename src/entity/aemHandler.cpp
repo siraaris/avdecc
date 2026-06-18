@@ -164,6 +164,17 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 							LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
 							return true;
 						}
+						case DescriptorType::StreamPortInput:
+						{
+							// 3SB (software-mode P2): the listener entity exposes a STREAM_PORT_INPUT (mandatory
+							// for a Milan listener, 5.3.2). Without this case READ_DESCRIPTOR returned
+							// NotImplemented and Hive flagged "Invalid StreamPortInput Descriptor Index" +
+							// downgraded the entity from Milan to plain IEEE 1722.1.
+							auto ser = protocol::aemPayload::serializeReadDescriptorCommonResponse(configIndex, descriptorType, descriptorIndex);
+							protocol::aemPayload::serializeReadStreamPortDescriptorResponse(ser, aemHandler.buildStreamPortInputDescriptor(configIndex, descriptorIndex));
+							LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+							return true;
+						}
 						case DescriptorType::AudioCluster:
 						{
 							auto ser = protocol::aemPayload::serializeReadDescriptorCommonResponse(configIndex, descriptorType, descriptorIndex);
@@ -600,6 +611,19 @@ StreamPortTree const* findStreamPortOutput(ConfigurationTree const& cfg, StreamP
 	return nullptr;
 }
 
+StreamPortTree const* findStreamPortInput(ConfigurationTree const& cfg, StreamPortIndex const streamPortIndex)
+{
+	for (auto const& [audioUnitIndex, audioUnit] : cfg.audioUnitTrees)
+	{
+		auto const it = audioUnit.streamPortInputTrees.find(streamPortIndex);
+		if (it != audioUnit.streamPortInputTrees.end())
+		{
+			return &it->second;
+		}
+	}
+	return nullptr;
+}
+
 AudioClusterNodeModels const* findAudioCluster(ConfigurationTree const& cfg, ClusterIndex const clusterIndex)
 {
 	for (auto const& [audioUnitIndex, audioUnit] : cfg.audioUnitTrees)
@@ -827,6 +851,27 @@ StreamPortDescriptor AemHandler::buildStreamPortOutputDescriptor(ConfigurationIn
 {
 	auto const& cfg = getConfigurationTree(_entityModelTree, configIndex);
 	auto const* const streamPort = findStreamPortOutput(cfg, streamPortIndex);
+	if (streamPort == nullptr)
+	{
+		throw NoSuchDescriptorException{};
+	}
+	auto const& s = streamPort->staticModel;
+	auto desc = StreamPortDescriptor{};
+	desc.clockDomainIndex = s.clockDomainIndex;
+	desc.portFlags = s.portFlags;
+	desc.numberOfControls = s.numberOfControls;
+	desc.baseControl = s.baseControl;
+	desc.numberOfClusters = s.numberOfClusters;
+	desc.baseCluster = s.baseCluster;
+	desc.numberOfMaps = s.numberOfMaps;
+	desc.baseMap = s.baseMap;
+	return desc;
+}
+
+StreamPortDescriptor AemHandler::buildStreamPortInputDescriptor(ConfigurationIndex const configIndex, StreamPortIndex const streamPortIndex) const
+{
+	auto const& cfg = getConfigurationTree(_entityModelTree, configIndex);
+	auto const* const streamPort = findStreamPortInput(cfg, streamPortIndex);
 	if (streamPort == nullptr)
 	{
 		throw NoSuchDescriptorException{};
