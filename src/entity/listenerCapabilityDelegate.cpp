@@ -452,7 +452,17 @@ void CapabilityDelegate::initiateTalkerHandshake(protocol::ProtocolInterface* co
 	// and delivers the talker's response (or an error) to our handler. We capture req by value because
 	// this is asynchronous. Capturing `this` requires the delegate to outlive the in-flight command —
 	// the same lifetime contract the controller/talker delegates rely on (the SM is torn down with us).
-	LocalEntityImpl<>::sendAcmpCommand(pi, connect ? protocol::AcmpMessageType::ConnectTxCommand : protocol::AcmpMessageType::DisconnectTxCommand, req.controllerID, req.talkerEntityID, static_cast<model::StreamIndex>(req.talkerUniqueID), _entityID, static_cast<model::StreamIndex>(req.listenerUniqueID), std::uint16_t{ 0u },
+	//
+	// The controller_entity_id of this CONNECT_TX is OUR listener entity id (_entityID), NOT the
+	// original controller (req.controllerID). IEEE 1722.1 would carry the original controller, but
+	// la_avdecc's CommandStateMachine only sends ACMP commands whose controller_entity_id is a
+	// REGISTERED LOCAL entity (commandStateMachine.cpp: _commandEntities.find(controllerEntityID) ->
+	// InvalidEntityType otherwise) — a remote controller id is rejected and the frame never hits the
+	// wire. The listener acts as its own controller for the talker handshake; the field is
+	// informational to the talker, which sets up the stream regardless. The result is forwarded back
+	// to the real controller via the CONNECT_RX_RESPONSE (sendListenerResponse), which already carries
+	// req.controllerID in its ACMP fields.
+	LocalEntityImpl<>::sendAcmpCommand(pi, connect ? protocol::AcmpMessageType::ConnectTxCommand : protocol::AcmpMessageType::DisconnectTxCommand, _entityID, req.talkerEntityID, static_cast<model::StreamIndex>(req.talkerUniqueID), _entityID, static_cast<model::StreamIndex>(req.listenerUniqueID), std::uint16_t{ 0u },
 		[this, req, connect, responseType](protocol::Acmpdu const* const response, LocalEntity::ControlStatus const status) noexcept
 		{
 			// Talker unreachable / timed out: tell the controller the listener-talker timed out.
@@ -493,9 +503,11 @@ void CapabilityDelegate::initiateTalkerHandshake(protocol::ProtocolInterface* co
 			sendListenerResponse(responseType, talkerStatus, req, streamID, destMac, vlanID, connectionCount);
 
 			// Drive the data plane (point the AAF receiver at / away from the bound stream).
+			// destMac/vlanID are the talker-reported wire identifiers the receiver binds its
+			// SOCK_RAW socket and stream filter to (alongside streamID).
 			if (talkerStatus == protocol::AcmpStatus::Success && _bindObserver)
 			{
-				_bindObserver(req.listenerUniqueID, connect, streamID);
+				_bindObserver(req.listenerUniqueID, connect, streamID, destMac, vlanID);
 			}
 		});
 }

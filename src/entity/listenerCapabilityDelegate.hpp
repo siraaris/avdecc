@@ -132,7 +132,7 @@ private:
 	// Invoked on CONNECT_RX/DISCONNECT_RX with the bound talker stream so the data plane (AAF
 	// receiver) knows which stream_id / dest_mac / vlan to receive. Runs on the protocol-interface
 	// thread. See aggregateEntity.hpp (ListenerBindObserver).
-	std::function<void(std::uint16_t /*listenerStreamIndex*/, bool /*bound*/, std::uint64_t /*streamID*/)> const _bindObserver;
+	std::function<void(std::uint16_t /*listenerStreamIndex*/, bool /*bound*/, std::uint64_t /*streamID*/, networkInterface::MacAddress const& /*destMac*/, std::uint16_t /*vlanID*/)> const _bindObserver;
 
 	// Per-STREAM_INPUT-descriptor binding state (the ACMP listener "RX state").
 	struct Binding

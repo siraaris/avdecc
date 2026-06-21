@@ -82,10 +82,11 @@ LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION setTalkerCountersProvider(UniqueIde
 /** 3SB additive (software-mode P2): observer invoked when the listener binds or unbinds a
   * STREAM_INPUT via the ACMP listener state machine (CONNECT_RX / DISCONNECT_RX), after the talker
   * handshake resolves. Arguments: the listener stream descriptor index, whether it is now bound, the
-  * on-wire AVTP stream_id, and the ACMP flags. Lets the daemon point the AAF receiver at the bound
-  * talker stream. Register BEFORE AggregateEntity::create(); consumed at construction. Runs on the
-  * protocol-interface thread — keep it short and non-blocking. */
-using ListenerBindObserver = std::function<void(std::uint16_t listenerUniqueID, bool bound, std::uint64_t streamID)>;
+  * on-wire AVTP stream_id, the stream destination multicast MAC, and the stream VLAN id. These three
+  * wire identifiers are exactly what the AAF receiver needs to bind a SOCK_RAW socket and filter for
+  * the bound talker stream. Register BEFORE AggregateEntity::create(); consumed at construction. Runs
+  * on the protocol-interface thread — keep it short and non-blocking. */
+using ListenerBindObserver = std::function<void(std::uint16_t listenerUniqueID, bool bound, std::uint64_t streamID, networkInterface::MacAddress const& destMac, std::uint16_t vlanID)>;
 LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION setListenerBindObserver(UniqueIdentifier const entityID, ListenerBindObserver observer) noexcept;
 
 class AggregateEntity : public LocalEntity, public controller::Interface
