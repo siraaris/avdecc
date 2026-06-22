@@ -25,7 +25,10 @@
 #include "aemHandler.hpp"
 #include "entityImpl.hpp"
 #include "protocol/protocolAemPayloads.hpp"
+#include "la/avdecc/internals/aggregateEntity.hpp" // 3SB additive: SetStreamFormat/SamplingRate handler types
 #include <limits>
+#include <mutex>
+#include <unordered_map>
 
 
 namespace la
@@ -45,12 +48,88 @@ public:
 	}
 };
 
+} // namespace model
+
+/* ************************************************************************** */
+/* SET_STREAM_FORMAT / SET_SAMPLING_RATE application-handler registry         */
+/* (3SB additive, software-mode P3)                                           */
+/* ************************************************************************** */
+// Same pattern + lifetime as the talker counters/wire-uid registries: the application registers a
+// handler by EUI-64 before AggregateEntity::create(); the AemHandler constructor takes (read+erase)
+// it. Lets the software-mode listener honor controller-driven media-clock/domain rate switches
+// without threading a callback through every capability delegate. A missing entry => the responder
+// answers SET_* with NotImplemented (talker build unchanged). Lives in namespace entity (alongside
+// the public setters) so AemHandler (namespace entity::model) finds the take helpers by enclosing
+// lookup.
+namespace
+{
+std::mutex& setHandlerRegistryMutex() noexcept
+{
+	static std::mutex s_mutex;
+	return s_mutex;
+}
+std::unordered_map<UniqueIdentifier::value_type, SetStreamFormatHandler>& setStreamFormatHandlerRegistry() noexcept
+{
+	static std::unordered_map<UniqueIdentifier::value_type, SetStreamFormatHandler> s_registry;
+	return s_registry;
+}
+std::unordered_map<UniqueIdentifier::value_type, SetSamplingRateHandler>& setSamplingRateHandlerRegistry() noexcept
+{
+	static std::unordered_map<UniqueIdentifier::value_type, SetSamplingRateHandler> s_registry;
+	return s_registry;
+}
+SetStreamFormatHandler takeSetStreamFormatHandler(UniqueIdentifier const entityID) noexcept
+{
+	auto const lock = std::lock_guard{ setHandlerRegistryMutex() };
+	auto& registry = setStreamFormatHandlerRegistry();
+	auto const it = registry.find(entityID.getValue());
+	if (it == registry.end())
+	{
+		return {};
+	}
+	auto handler = std::move(it->second);
+	registry.erase(it);
+	return handler;
+}
+SetSamplingRateHandler takeSetSamplingRateHandler(UniqueIdentifier const entityID) noexcept
+{
+	auto const lock = std::lock_guard{ setHandlerRegistryMutex() };
+	auto& registry = setSamplingRateHandlerRegistry();
+	auto const it = registry.find(entityID.getValue());
+	if (it == registry.end())
+	{
+		return {};
+	}
+	auto handler = std::move(it->second);
+	registry.erase(it);
+	return handler;
+}
+} // namespace
+
+void LA_AVDECC_CALL_CONVENTION setEntitySetStreamFormatHandler(UniqueIdentifier const entityID, SetStreamFormatHandler handler) noexcept
+{
+	auto const lock = std::lock_guard{ setHandlerRegistryMutex() };
+	setStreamFormatHandlerRegistry()[entityID.getValue()] = std::move(handler);
+}
+
+void LA_AVDECC_CALL_CONVENTION setEntitySetSamplingRateHandler(UniqueIdentifier const entityID, SetSamplingRateHandler handler) noexcept
+{
+	auto const lock = std::lock_guard{ setHandlerRegistryMutex() };
+	setSamplingRateHandlerRegistry()[entityID.getValue()] = std::move(handler);
+}
+
+namespace model
+{
 AemHandler::AemHandler(entity::Entity const& entity, entity::model::EntityTree const* const entityModelTree, std::vector<std::uint16_t> streamOutputWireUids, CountersProvider countersProvider, std::vector<std::uint32_t> streamOutputPresentationOffsetsNs)
 	: _entity{ entity }
 	, _entityModelTree{ entityModelTree }
 	, _streamOutputWireUids{ std::move(streamOutputWireUids) }
 	, _countersProvider{ std::move(countersProvider) }
 	, _streamOutputPresentationOffsetsNs{ std::move(streamOutputPresentationOffsetsNs) }
+	// 3SB additive: take (read+erase) the SET_STREAM_FORMAT / SET_SAMPLING_RATE handlers the
+	// application registered for this entity. Empty for a talker build (none registered).
+	, _setStreamFormatHandler{ takeSetStreamFormatHandler(entity.getEntityID()) }
+	, _setSamplingRateHandler{ takeSetSamplingRateHandler(entity.getEntityID()) }
 {
 	// Valide the entity model
 	validateEntityModel(_entityModelTree);
@@ -239,6 +318,69 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 				LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
 				return true;
 			} },
+			// SET_STREAM_FORMAT (StreamInput / StreamOutput) — 3SB additive (software-mode P3). Hand the
+			// requested format to the application handler, which validates it against the descriptor's
+			// advertised formats and applies it to the model + data plane (the software listener switches
+			// its media-clock / AAF rate). No handler registered (e.g. a talker build) => return false so the
+			// responder answers NotImplemented as before. The handler mutates the entity model tree on this
+			// (protocol-interface) thread, so a subsequent GET_STREAM_FORMAT reflects it.
+			{ protocol::AemCommandType::SetStreamFormat.getValue(),
+				[](protocol::ProtocolInterface* const pi, AemHandler const& aemHandler, protocol::AemAecpdu const& aem)
+				{
+					if (!aemHandler._setStreamFormatHandler)
+					{
+						return false;
+					}
+					auto const [descriptorType, streamIndex, streamFormat] = protocol::aemPayload::deserializeSetStreamFormatCommand(aem.getPayload());
+					if (aemHandler._setStreamFormatHandler(descriptorType, streamIndex, streamFormat))
+					{
+						auto ser = protocol::aemPayload::serializeSetStreamFormatResponse(descriptorType, streamIndex, streamFormat);
+						LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+					}
+					else
+					{
+						LocalEntityImpl<>::reflectAecpCommand(pi, aem, protocol::AemAecpStatus::NotSupported);
+					}
+					return true;
+				} },
+			// SET_SAMPLING_RATE (AudioUnit) — 3SB additive (software-mode P3). Same contract as
+			// SET_STREAM_FORMAT: the application validates + applies the rate (the listener switches its whole
+			// clock domain coherently — sampling rate + all AAF/CRF stream formats). No handler => NotImplemented.
+			{ protocol::AemCommandType::SetSamplingRate.getValue(),
+				[](protocol::ProtocolInterface* const pi, AemHandler const& aemHandler, protocol::AemAecpdu const& aem)
+				{
+					if (!aemHandler._setSamplingRateHandler)
+					{
+						return false;
+					}
+					auto const [descriptorType, descriptorIndex, samplingRate] = protocol::aemPayload::deserializeSetSamplingRateCommand(aem.getPayload());
+					if (aemHandler._setSamplingRateHandler(descriptorType, descriptorIndex, samplingRate))
+					{
+						auto ser = protocol::aemPayload::serializeSetSamplingRateResponse(descriptorType, descriptorIndex, samplingRate);
+						LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+					}
+					else
+					{
+						LocalEntityImpl<>::reflectAecpCommand(pi, aem, protocol::AemAecpStatus::NotSupported);
+					}
+					return true;
+				} },
+			// GET_SAMPLING_RATE (AudioUnit) — 3SB additive: report the audio unit's current sampling rate
+			// from the model tree so a controller can read it back after a SET_SAMPLING_RATE. Read-only.
+			{ protocol::AemCommandType::GetSamplingRate.getValue(),
+				[](protocol::ProtocolInterface* const pi, AemHandler const& aemHandler, protocol::AemAecpdu const& aem)
+				{
+					if (aemHandler._entityModelTree == nullptr)
+					{
+						return false;
+					}
+					auto const [descriptorType, descriptorIndex] = protocol::aemPayload::deserializeGetSamplingRateCommand(aem.getPayload());
+					auto const configIndex = aemHandler._entityModelTree->dynamicModel.currentConfiguration;
+					auto const audioUnit = aemHandler.buildAudioUnitDescriptor(configIndex, descriptorIndex);
+					auto ser = protocol::aemPayload::serializeGetSamplingRateResponse(descriptorType, descriptorIndex, audioUnit.currentSamplingRate);
+					LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+					return true;
+				} },
 		// GET_STREAM_INFO (StreamInput / StreamOutput) - IEEE1722.1-2013 base form.
 		// Carries the on-wire stream identification (stream_id / dest_mac / format / vlan) a
 		// controller (Hive) uses to resolve a talker stream to a live, network-present node.

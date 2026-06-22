@@ -49,6 +49,12 @@ public:
 	// countersProvider (3SB additive, GH #15 / M5): answers STREAM_OUTPUT GET_COUNTERS; empty =>
 	// GET_COUNTERS responds NotImplemented.
 	using CountersProvider = std::function<bool(std::uint16_t talkerUniqueID, entity::model::DescriptorCounterValidFlag& validCounters, entity::model::DescriptorCounters& counters)>;
+	// SET_STREAM_FORMAT / SET_SAMPLING_RATE application handlers (3SB additive, software-mode P3).
+	// Populated in the constructor from the per-entity registry the application fills via
+	// setEntitySetStreamFormatHandler / setEntitySetSamplingRateHandler (aggregateEntity.hpp). Empty =>
+	// the responder answers NotImplemented (talker build unchanged). See the dispatch entries in the .cpp.
+	using SetStreamFormatHandler = std::function<bool(entity::model::DescriptorType const descriptorType, entity::model::StreamIndex const streamIndex, entity::model::StreamFormat const streamFormat)>;
+	using SetSamplingRateHandler = std::function<bool(entity::model::DescriptorType const descriptorType, entity::model::DescriptorIndex const descriptorIndex, entity::model::SamplingRate const samplingRate)>;
 	AemHandler(entity::Entity const& entity, entity::model::EntityTree const* const entityModelTree, std::vector<std::uint16_t> streamOutputWireUids = {}, CountersProvider countersProvider = {}, std::vector<std::uint32_t> streamOutputPresentationOffsetsNs = {});
 
 	static void validateEntityModel(entity::model::EntityTree const* const entityModelTree);
@@ -91,6 +97,8 @@ private:
 	std::vector<std::uint16_t> _streamOutputWireUids;
 	CountersProvider _countersProvider;
 	std::vector<std::uint32_t> _streamOutputPresentationOffsetsNs;
+	SetStreamFormatHandler _setStreamFormatHandler;
+	SetSamplingRateHandler _setSamplingRateHandler;
 };
 
 } // namespace model

@@ -89,6 +89,25 @@ LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION setTalkerCountersProvider(UniqueIde
 using ListenerBindObserver = std::function<void(std::uint16_t listenerUniqueID, bool bound, std::uint64_t streamID, networkInterface::MacAddress const& destMac, std::uint16_t vlanID)>;
 LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION setListenerBindObserver(UniqueIdentifier const entityID, ListenerBindObserver observer) noexcept;
 
+/** 3SB additive (software-mode P3): handler invoked when a controller issues SET_STREAM_FORMAT on a
+  * STREAM_INPUT / STREAM_OUTPUT of this local entity (responder side). The application validates the
+  * requested format against the descriptor's advertised formats, applies it to its model + data plane
+  * (e.g. the software listener's media-clock/AAF rate), and returns true to ACK (Success) or false to
+  * reject (the responder then replies NotSupported). When no handler is registered the command is
+  * answered NotImplemented as before — so a talker build is unaffected. Register BEFORE
+  * AggregateEntity::create(); consumed at construction. Runs on the protocol-interface thread (the
+  * same thread that serves GET_STREAM_FORMAT), so it may safely mutate the entity model tree. */
+using SetStreamFormatHandler = std::function<bool(model::DescriptorType const descriptorType, model::StreamIndex const streamIndex, model::StreamFormat const streamFormat)>;
+LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION setEntitySetStreamFormatHandler(UniqueIdentifier const entityID, SetStreamFormatHandler handler) noexcept;
+
+/** 3SB additive (software-mode P3): handler invoked when a controller issues SET_SAMPLING_RATE on an
+  * AUDIO_UNIT of this local entity. Same contract/threading as setEntitySetStreamFormatHandler: the
+  * application validates the rate, applies it (the software listener switches its whole clock domain
+  * coherently — sampling rate + all AAF/CRF stream formats), and returns true to ACK / false to
+  * reject. No handler => NotImplemented (talker unaffected). Register BEFORE AggregateEntity::create(). */
+using SetSamplingRateHandler = std::function<bool(model::DescriptorType const descriptorType, model::DescriptorIndex const descriptorIndex, model::SamplingRate const samplingRate)>;
+LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION setEntitySetSamplingRateHandler(UniqueIdentifier const entityID, SetSamplingRateHandler handler) noexcept;
+
 class AggregateEntity : public LocalEntity, public controller::Interface
 {
 public:
