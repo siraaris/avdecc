@@ -120,11 +120,12 @@ void LA_AVDECC_CALL_CONVENTION setEntitySetSamplingRateHandler(UniqueIdentifier 
 
 namespace model
 {
-AemHandler::AemHandler(entity::Entity const& entity, entity::model::EntityTree const* const entityModelTree, std::vector<std::uint16_t> streamOutputWireUids, CountersProvider countersProvider, std::vector<std::uint32_t> streamOutputPresentationOffsetsNs)
+AemHandler::AemHandler(entity::Entity const& entity, entity::model::EntityTree const* const entityModelTree, std::vector<std::uint16_t> streamOutputWireUids, CountersProvider countersProvider, std::vector<std::uint32_t> streamOutputPresentationOffsetsNs, CountersProvider streamInputCountersProvider)
 	: _entity{ entity }
 	, _entityModelTree{ entityModelTree }
 	, _streamOutputWireUids{ std::move(streamOutputWireUids) }
 	, _countersProvider{ std::move(countersProvider) }
+	, _streamInputCountersProvider{ std::move(streamInputCountersProvider) }
 	, _streamOutputPresentationOffsetsNs{ std::move(streamOutputPresentationOffsetsNs) }
 	// 3SB additive: take (read+erase) the SET_STREAM_FORMAT / SET_SAMPLING_RATE handlers the
 	// application registered for this entity. Empty for a talker build (none registered).
@@ -526,6 +527,16 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 				// Report a healthy media-locked input (MediaLocked=1, all others 0).
 				if (descriptorType == DescriptorType::StreamInput)
 				{
+					// 3SB #226: if the listener registered a live provider, report the real receive-engine
+					// state (MEDIA_LOCKED reflects actual lock; FRAMES_RX/SEQ_NUM_MISMATCH from the wire) so
+					// a controller (Hive) shows "Media Locked (Milan)" rather than the generic connected
+					// state. Falls through to the static healthy-locked report when no provider is set.
+					if (aemHandler._streamInputCountersProvider && aemHandler._streamInputCountersProvider(descriptorIndex, validCounters, counters))
+					{
+						auto ser = protocol::aemPayload::serializeGetCountersResponse(descriptorType, descriptorIndex, validCounters, counters);
+						LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+						return true;
+					}
 					auto const set = [&](unsigned bit, std::uint32_t value) { counters[bit] = value; validCounters |= (std::uint32_t{ 1u } << bit); };
 					set(0, 1u);  // MediaLocked
 					set(1, 0u);  // MediaUnlocked

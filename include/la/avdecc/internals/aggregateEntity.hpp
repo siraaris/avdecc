@@ -89,6 +89,23 @@ LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION setTalkerCountersProvider(UniqueIde
 using ListenerBindObserver = std::function<void(std::uint16_t listenerUniqueID, bool bound, std::uint64_t streamID, networkInterface::MacAddress const& destMac, std::uint16_t vlanID)>;
 LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION setListenerBindObserver(UniqueIdentifier const entityID, ListenerBindObserver observer) noexcept;
 
+/** 3SB additive (#226): provider the listener responder calls to answer GET_COUNTERS for a
+  * STREAM_INPUT. Given the listener stream descriptor index, fill the valid-flags mask + the 32-entry
+  * counter array (MEDIA_LOCKED / MEDIA_UNLOCKED / FRAMES_RX / SEQ_NUM_MISMATCH ...) from the live
+  * receive engine and return true (false => the static healthy-locked fallback is used). Lets a
+  * controller (Hive) report real "Media Locked (Milan)" state. Register BEFORE
+  * AggregateEntity::create(); consumed at construction. Runs on the protocol-interface thread — keep
+  * it short and non-blocking. */
+using ListenerCountersProvider = std::function<bool(std::uint16_t listenerUniqueID, model::DescriptorCounterValidFlag& validCounters, model::DescriptorCounters& counters)>;
+LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION setListenerCountersProvider(UniqueIdentifier const entityID, ListenerCountersProvider provider) noexcept;
+
+/** 3SB additive (#226): push an unsolicited STREAM_INPUT GET_COUNTERS notification to subscribed
+  * controllers so they update per-stream Media-Locked state live (controllers read counters once at
+  * enumeration, then rely on unsolicited updates). Call when the receive engine's lock state for a
+  * stream changes. Safe to call from the daemon thread; no-op if the entity has no live listener
+  * delegate or no subscribed controller. */
+LA_AVDECC_API void LA_AVDECC_CALL_CONVENTION notifyListenerStreamInputCountersChanged(UniqueIdentifier const entityID, std::uint16_t const streamIndex, model::DescriptorCounterValidFlag const validCounters, model::DescriptorCounters const& counters) noexcept;
+
 /** 3SB additive (software-mode P3): handler invoked when a controller issues SET_STREAM_FORMAT on a
   * STREAM_INPUT / STREAM_OUTPUT of this local entity (responder side). The application validates the
   * requested format against the descriptor's advertised formats, applies it to its model + data plane

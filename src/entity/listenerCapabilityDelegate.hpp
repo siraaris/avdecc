@@ -81,6 +81,13 @@ public:
 	CapabilityDelegate& operator=(CapabilityDelegate const&) = delete;
 	CapabilityDelegate& operator=(CapabilityDelegate&&) = delete;
 
+	// 3SB #226: push an unsolicited STREAM_INPUT GET_COUNTERS notification to all subscribed
+	// controllers, so Hive updates the per-stream Media-Locked state live when the receive engine's
+	// lock state changes (controllers read counters once at enumeration, then rely on unsolicited
+	// updates). Called by the daemon via notifyListenerStreamInputCountersChanged(). No-op if no
+	// controller is subscribed.
+	void pushStreamInputCountersNotification(std::uint16_t const streamIndex, model::DescriptorCounterValidFlag const validCounters, model::DescriptorCounters const& counters) noexcept;
+
 private:
 	/* ************************************************************************** */
 	/* CapabilityDelegate overrides                                               */
@@ -142,6 +149,7 @@ private:
 		protocol::AcmpUniqueID talkerUniqueID{ 0u };
 		std::uint64_t streamID{ 0u };
 		networkInterface::MacAddress streamDestAddress{};
+		std::uint16_t vlanID{ 0u };
 		entity::ConnectionFlags flags{};
 	};
 	mutable std::mutex _bindingsMutex;

@@ -59,12 +59,45 @@ std::unordered_map<UniqueIdentifier::value_type, ListenerBindObserver>& bindObse
 	static std::unordered_map<UniqueIdentifier::value_type, ListenerBindObserver> s_registry;
 	return s_registry;
 }
+// 3SB #226: registry for the listener STREAM_INPUT counters provider (live receive-engine lock /
+// frames / seq-errors), so GET_COUNTERS reports real media-lock state instead of a static stub.
+std::unordered_map<UniqueIdentifier::value_type, ListenerCountersProvider>& listenerCountersProviderRegistry() noexcept
+{
+	static std::unordered_map<UniqueIdentifier::value_type, ListenerCountersProvider> s_registry;
+	return s_registry;
+}
+// 3SB #226: registry of LIVE listener delegates (added in the ctor, removed in the dtor), so the
+// daemon can push an unsolicited STREAM_INPUT GET_COUNTERS notification by entityID at RUNTIME (after
+// construction) when a stream's media-lock state changes — controllers read counters once at
+// enumeration then rely on unsolicited updates.
+std::unordered_map<UniqueIdentifier::value_type, listener::CapabilityDelegate*>& liveListenerDelegateRegistry() noexcept
+{
+	static std::unordered_map<UniqueIdentifier::value_type, listener::CapabilityDelegate*> s_registry;
+	return s_registry;
+}
 } // namespace
 
 void LA_AVDECC_CALL_CONVENTION setListenerBindObserver(UniqueIdentifier const entityID, ListenerBindObserver observer) noexcept
 {
 	auto const lock = std::lock_guard{ listenerRegistryMutex() };
 	bindObserverRegistry()[entityID.getValue()] = std::move(observer);
+}
+
+void LA_AVDECC_CALL_CONVENTION setListenerCountersProvider(UniqueIdentifier const entityID, ListenerCountersProvider provider) noexcept
+{
+	auto const lock = std::lock_guard{ listenerRegistryMutex() };
+	listenerCountersProviderRegistry()[entityID.getValue()] = std::move(provider);
+}
+
+void LA_AVDECC_CALL_CONVENTION notifyListenerStreamInputCountersChanged(UniqueIdentifier const entityID, std::uint16_t const streamIndex, model::DescriptorCounterValidFlag const validCounters, model::DescriptorCounters const& counters) noexcept
+{
+	auto const lock = std::lock_guard{ listenerRegistryMutex() };
+	auto& registry = liveListenerDelegateRegistry();
+	auto const it = registry.find(entityID.getValue());
+	if (it != registry.end() && it->second != nullptr)
+	{
+		it->second->pushStreamInputCountersNotification(streamIndex, validCounters, counters);
+	}
 }
 
 namespace listener
@@ -84,6 +117,20 @@ ListenerBindObserver takeListenerBindObserver(UniqueIdentifier const entityID) n
 	auto observer = std::move(it->second);
 	registry.erase(it);
 	return observer;
+}
+// Take (read + erase) the registered STREAM_INPUT counters provider for an entity, or empty if none.
+ListenerCountersProvider takeListenerCountersProvider(UniqueIdentifier const entityID) noexcept
+{
+	auto const lock = std::lock_guard{ listenerRegistryMutex() };
+	auto& registry = listenerCountersProviderRegistry();
+	auto const it = registry.find(entityID.getValue());
+	if (it == registry.end())
+	{
+		return {};
+	}
+	auto provider = std::move(it->second);
+	registry.erase(it);
+	return provider;
 }
 } // namespace
 
@@ -109,9 +156,13 @@ try
 	, _entityID{ entity.getEntityID() }
 	, _listenerMac{ listenerMacFromEntity(entity) }
 	, _entityModelTree{ entityModelTree }
-	, _aemHandler{ entity, entityModelTree }
+	, _aemHandler{ entity, entityModelTree, {}, {}, {}, takeListenerCountersProvider(entity.getEntityID()) }
 	, _bindObserver{ takeListenerBindObserver(entity.getEntityID()) }
 {
+	// 3SB #226: register as the live delegate for this entity so the daemon can push unsolicited
+	// STREAM_INPUT counters notifications at runtime (removed in the dtor).
+	auto const lock = std::lock_guard{ listenerRegistryMutex() };
+	liveListenerDelegateRegistry()[_entityID.getValue()] = this;
 }
 catch (Exception const&)
 {
@@ -119,7 +170,28 @@ catch (Exception const&)
 }
 // clang-format on
 
-CapabilityDelegate::~CapabilityDelegate() noexcept {}
+CapabilityDelegate::~CapabilityDelegate() noexcept
+{
+	auto const lock = std::lock_guard{ listenerRegistryMutex() };
+	auto& registry = liveListenerDelegateRegistry();
+	auto const it = registry.find(_entityID.getValue());
+	if (it != registry.end() && it->second == this)
+	{
+		registry.erase(it);
+	}
+}
+
+void CapabilityDelegate::pushStreamInputCountersNotification(std::uint16_t const streamIndex, model::DescriptorCounterValidFlag const validCounters, model::DescriptorCounters const& counters) noexcept
+{
+	try
+	{
+		auto ser = protocol::aemPayload::serializeGetCountersResponse(model::DescriptorType::StreamInput, static_cast<model::DescriptorIndex>(streamIndex), validCounters, counters);
+		pushUnsolicitedAemNotification(_protocolInterface, protocol::AemCommandType::GetCounters, UniqueIdentifier{}, ser.data(), ser.size());
+	}
+	catch (...)
+	{
+	}
+}
 
 /* ************************************************************************** */
 /* CapabilityDelegate overrides — AECP (identical shape to the talker)        */
@@ -367,10 +439,23 @@ bool CapabilityDelegate::sendStreamInputInfoExResponse(protocol::ProtocolInterfa
 			return false;
 		}
 
-		// Minimal valid report (probing Disabled — we do a single CONNECT_TX, not Milan fast-connect
-		// probing). Struct defaults satisfy the controller's mandatory-dynamic-info check; the live
-		// binding is reported via ACMP GET_RX_STATE.
-		auto const info = model::StreamInputInfoEx{};
+		// 3SB #226: report probingStatus = Completed. Controllers (Hive) query GetStreamInputInfoEx ONLY
+		// once at enumeration (not on connection change) and gate the "Media Locked" display on
+		// probingStatus == Completed. The default Disabled would fail that gate forever — even after the
+		// stream locks — so we report Completed (the sink settles via a single CONNECT_TX, not Milan
+		// fast-connect probing) and let the live MEDIA_LOCKED stream-input counters (pushed unsolicited
+		// on lock change) drive the actual lock display. Populate the bound talker when connected.
+		auto info = model::StreamInputInfoEx{};
+		info.probingStatus = model::ProbingStatus::Completed;
+		info.acmpStatus = protocol::AcmpStatus::Success;
+		{
+			std::lock_guard<std::mutex> const lock(_bindingsMutex);
+			auto const it = _bindings.find(static_cast<protocol::AcmpUniqueID>(descriptorIndex));
+			if (it != _bindings.end() && it->second.connected)
+			{
+				info.talkerStream = model::StreamIdentification{ it->second.talkerEntityID, static_cast<model::StreamIndex>(it->second.talkerUniqueID) };
+			}
+		}
 		auto ser = protocol::mvuPayload::serializeGetStreamInputInfoExResponse(descriptorType, descriptorIndex, info);
 
 		auto frame = protocol::MvuAecpdu::create(true /* isResponse */);
@@ -490,6 +575,7 @@ void CapabilityDelegate::initiateTalkerHandshake(protocol::ProtocolInterface* co
 					binding.talkerUniqueID = req.talkerUniqueID;
 					binding.streamID = streamID;
 					binding.streamDestAddress = destMac;
+					binding.vlanID = vlanID;
 					binding.flags = req.flags;
 					connectionCount = 1u;
 				}
@@ -554,7 +640,7 @@ void CapabilityDelegate::onAcmpCommand(protocol::ProtocolInterface* const pi, pr
 			auto stateReq = req;
 			stateReq.talkerEntityID = b.talkerEntityID;
 			stateReq.talkerUniqueID = b.talkerUniqueID;
-			sendListenerResponse(responseType, protocol::AcmpStatus::Success, stateReq, b.streamID, b.streamDestAddress, std::uint16_t{ 2u }, std::uint16_t{ 1u });
+			sendListenerResponse(responseType, protocol::AcmpStatus::Success, stateReq, b.streamID, b.streamDestAddress, b.vlanID, std::uint16_t{ 1u });
 		}
 		else
 		{
