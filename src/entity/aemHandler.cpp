@@ -382,6 +382,27 @@ bool AemHandler::onUnhandledAecpAemCommand(protocol::ProtocolInterface* const pi
 					LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
 					return true;
 				} },
+			// GET_CLOCK_SOURCE (ClockDomain) — 3SB additive: report the clock domain's currently active
+			// clock source index from the model tree. streamd's clocking probe issues this against each
+			// listener to confirm it clocks from the CRF media-clock input; unanswered, the probe records
+			// active-clock-source-read-failed and the monitor shows "Clock Source Unknown". The model's
+			// dynamic clockSourceIndex is the active source (index 0 -> InputStream @ the CRF STREAM_INPUT
+			// on the listener, Internal on the talker). Read-only; SET_CLOCK_SOURCE stays NotImplemented
+			// (single-source domains, nothing to switch).
+			{ protocol::AemCommandType::GetClockSource.getValue(),
+				[](protocol::ProtocolInterface* const pi, AemHandler const& aemHandler, protocol::AemAecpdu const& aem)
+				{
+					if (aemHandler._entityModelTree == nullptr)
+					{
+						return false;
+					}
+					auto const [descriptorType, descriptorIndex] = protocol::aemPayload::deserializeGetClockSourceCommand(aem.getPayload());
+					auto const configIndex = aemHandler._entityModelTree->dynamicModel.currentConfiguration;
+					auto const clockDomain = aemHandler.buildClockDomainDescriptor(configIndex, descriptorIndex);
+					auto ser = protocol::aemPayload::serializeGetClockSourceResponse(descriptorType, descriptorIndex, clockDomain.clockSourceIndex);
+					LocalEntityImpl<>::sendAemAecpResponse(pi, aem, protocol::AemAecpStatus::Success, ser.data(), ser.size());
+					return true;
+				} },
 		// GET_STREAM_INFO (StreamInput / StreamOutput) - IEEE1722.1-2013 base form.
 		// Carries the on-wire stream identification (stream_id / dest_mac / format / vlan) a
 		// controller (Hive) uses to resolve a talker stream to a live, network-present node.
